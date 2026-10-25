@@ -18,6 +18,7 @@ dependencies = [
   "av",
   "boto3",
   "confluent-kafka",
+  "lightning",
   "mlflow-skinny",
   "numpy",
   "pillow",

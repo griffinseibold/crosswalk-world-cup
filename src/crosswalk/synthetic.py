@@ -2,7 +2,7 @@
 
 Coloured rectangles on a grey "road", labelled as cars and pedestrians. The
 images are meaningless to a pretrained detector, but they exercise every part
-of the platform (parsing, hashing, data loading, the training loop,
+of the platform (parsing, hashing, data loading, training,
 checkpoints, resume, evaluation, MLflow) in seconds on a CPU, in CI and as a
 smoke test on the cluster before BDD100K is in place.
 """

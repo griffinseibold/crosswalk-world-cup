@@ -22,10 +22,11 @@ import yaml
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
+from lightning.pytorch.loggers import Logger  # noqa: E402
+
 from crosswalk.config import ModelConfig, TrainingConfig  # noqa: E402
 from crosswalk.training import state  # noqa: E402
-from crosswalk.training.loop import ResumeMismatch, train  # noqa: E402
-from crosswalk.training.tracking import NullTracker  # noqa: E402
+from crosswalk.training.trainer import ResumeMismatch, train  # noqa: E402
 from tests.conftest import subprocess_env  # noqa: E402
 
 TINY = ModelConfig(
@@ -73,10 +74,10 @@ def make_config(data, tmp_path, **overrides) -> TrainingConfig:
     return TrainingConfig.model_validate(config_dict(data, tmp_path, **overrides))
 
 
-def final_weights(tmp_path: Path, run: str = "test-run") -> dict:
+def final_checkpoint(tmp_path: Path, run: str = "test-run") -> dict:
     ckpt_dir = tmp_path / "ckpt" / run
     pointer = json.loads((ckpt_dir / "latest.json").read_text())
-    return state.load_state(str(ckpt_dir / pointer["key"]))
+    return state.load_checkpoint(str(ckpt_dir / pointer["key"]))
 
 
 # -- model -------------------------------------------------------------------------
@@ -138,67 +139,75 @@ def test_validation_runs_on_cpu():
     assert "OK" in validate.report(result)
 
 
-# -- checkpoint state ----------------------------------------------------------------
+# -- checkpoint contents ----------------------------------------------------------
 
 
-def test_state_round_trip_restores_everything(tmp_path):
+def test_weights_load_from_lightning_and_old_checkpoints():
     from crosswalk.models import build_detector
-    from crosswalk.training.schedule import WarmupCosine
 
-    def setup():
-        model = build_detector(TINY, for_training=True)
-        opt = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        sched = torch.optim.lr_scheduler.LambdaLR(opt, WarmupCosine(50, 5, 0.1))
-        return model, opt, sched
+    model = build_detector(TINY)
+    lightning_ckpt = {
+        "state_dict": {f"model.{k}": v for k, v in model.state_dict().items()},
+        "crosswalk": {"classes": ["car", "pedestrian"], "model_config": TINY.model_dump()},
+    }
+    loaded = state.weights(lightning_ckpt)
+    assert loaded["classes"] == ["car", "pedestrian"]
+    fresh = build_detector(TINY)
+    fresh.load_state_dict(loaded["model"])  # strict: every key matches a plain detector
+    old = {"format": 1, "model": model.state_dict(), "classes": ["car"]}
+    assert state.weights(old)["classes"] == ["car"]
+    with pytest.raises(ValueError):
+        state.weights({"something": "else"})
 
-    model, opt, sched = setup()
-    images = [torch.rand(3, 64, 96)]
-    targets = [{"boxes": torch.tensor([[5.0, 5.0, 40.0, 30.0]]), "labels": torch.tensor([1])}]
-    for _ in range(3):
-        opt.zero_grad()
-        sum(model(images, targets).values()).backward()
-        opt.step()
-        sched.step()
+
+def test_rng_round_trip():
     random.seed(1)
     np.random.seed(2)
     torch.manual_seed(3)
-    progress = state.Progress(step=3, epoch=1, batch_in_epoch=2)
-    saved = state.build_state(
-        model=model, optimizer=opt, scheduler=sched, scaler=None, progress=progress,
-        classes=["car", "pedestrian"], config={"a": 1}, config_hash="h",
-    )  # fmt: skip
-    path = tmp_path / "s.pt"
-    state.save_state(saved, str(path))
-    expected_draws = (random.random(), np.random.rand(), torch.rand(1).item())
-
-    model2, opt2, sched2 = setup()
-    random.seed(99)
-    np.random.seed(99)
-    torch.manual_seed(99)
-    restored = state.restore(
-        state.load_state(str(path)), model=model2, optimizer=opt2, scheduler=sched2, scaler=None
-    )
-    assert restored == progress
-    assert (random.random(), np.random.rand(), torch.rand(1).item()) == expected_draws
-    for p1, p2 in zip(model.state_dict().values(), model2.state_dict().values(), strict=True):
-        assert torch.equal(p1, p2)
-    momentum = [s["momentum_buffer"] for s in opt.state_dict()["state"].values()]
-    momentum2 = [s["momentum_buffer"] for s in opt2.state_dict()["state"].values()]
-    assert all(torch.equal(a, b) for a, b in zip(momentum, momentum2, strict=True))
-    assert sched2.last_epoch == 3 and sched2.get_last_lr() == sched.get_last_lr()
+    saved = state.capture_rng()
+    expected = (random.random(), np.random.rand(), torch.rand(1).item())
+    random.seed(9)
+    np.random.seed(9)
+    torch.manual_seed(9)
+    state.restore_rng(saved)
+    assert (random.random(), np.random.rand(), torch.rand(1).item()) == expected
 
 
-def test_unknown_checkpoint_format_is_refused():
-    with pytest.raises(ValueError, match="format"):
-        state.restore({"format": 999}, model=None, optimizer=None, scheduler=None, scaler=None)
+# -- training with Lightning -----------------------------------------------------------
 
 
-# -- the loop ----------------------------------------------------------------------------
+class RecordingLogger(Logger):
+    """An in-memory Lightning logger standing in for MLflow."""
+
+    run_id = "run-123"
+
+    def __init__(self):
+        super().__init__()
+        self.metrics: list[tuple[int, dict]] = []
+        self.params: dict = {}
+        self.status = None
+
+    @property
+    def name(self):
+        return "recording"
+
+    @property
+    def version(self):
+        return "0"
+
+    def log_hyperparams(self, params, *args, **kwargs):
+        self.params = dict(params)
+
+    def log_metrics(self, metrics, step=None):
+        self.metrics.append((step, dict(metrics)))
+
+    def finalize(self, status):
+        self.status = status
 
 
 def test_training_runs_checkpoints_and_evaluates(synthetic_data, tmp_path):
     config = make_config(synthetic_data, tmp_path)
-    summary = train(config, tracker=NullTracker())
+    summary = train(config)
     assert summary.final_step == summary.total_steps == 12  # 16 images / 4 per batch * 3 epochs
     assert not summary.resumed
     assert "map" in summary.eval and 0.0 <= summary.eval["map"] <= 1.0
@@ -211,15 +220,17 @@ def test_training_runs_checkpoints_and_evaluates(synthetic_data, tmp_path):
         "step-00000012.pt",
         "summary.json",
     ]
-    final = final_weights(tmp_path)
-    assert final["progress"] == {"step": 12, "epoch": 3, "batch_in_epoch": 0}
-    assert final["classes"] == ["car", "pedestrian"]
+    final = final_checkpoint(tmp_path)
+    meta = state.metadata(final)
+    assert meta["progress"] == {"step": 12, "epoch": 3, "batch_in_epoch": 0}
+    assert meta["classes"] == ["car", "pedestrian"]
+    assert final["global_step"] == 12  # Lightning's own record agrees
 
 
 def test_rerunning_a_finished_run_resumes_and_does_nothing(synthetic_data, tmp_path):
     config = make_config(synthetic_data, tmp_path, epochs=1)
-    train(config, tracker=NullTracker())
-    again = train(config, tracker=NullTracker())
+    train(config)
+    again = train(config)
     assert again.resumed and again.final_step == 4 and again.resume["checkpoint_step"] == 4
 
 
@@ -230,12 +241,11 @@ def test_resume_policies_and_config_mismatch(synthetic_data, tmp_path):
                 synthetic_data,
                 tmp_path,
                 checkpoint={"local_dir": str(tmp_path / "ckpt"), "resume": "must"},
-            ),
-            tracker=NullTracker(),
+            )
         )
-    train(make_config(synthetic_data, tmp_path, epochs=1), tracker=NullTracker())
+    train(make_config(synthetic_data, tmp_path, epochs=1))
     with pytest.raises(ResumeMismatch, match="different training config"):
-        train(make_config(synthetic_data, tmp_path, epochs=1, seed=12), tracker=NullTracker())
+        train(make_config(synthetic_data, tmp_path, epochs=1, seed=12))
     with pytest.raises(ResumeMismatch, match="resume=never"):
         train(
             make_config(
@@ -243,17 +253,17 @@ def test_resume_policies_and_config_mismatch(synthetic_data, tmp_path):
                 tmp_path,
                 epochs=1,
                 checkpoint={"local_dir": str(tmp_path / "ckpt"), "resume": "never"},
-            ),
-            tracker=NullTracker(),
+            )
         )
 
 
 def test_same_seed_gives_identical_weights(synthetic_data, tmp_path):
-    train(make_config(synthetic_data, tmp_path / "a", epochs=1), tracker=NullTracker())
-    train(make_config(synthetic_data, tmp_path / "b", epochs=1), tracker=NullTracker())
-    a, b = final_weights(tmp_path / "a"), final_weights(tmp_path / "b")
-    for k in a["model"]:
-        assert torch.equal(a["model"][k], b["model"][k]), k
+    train(make_config(synthetic_data, tmp_path / "a", epochs=1))
+    train(make_config(synthetic_data, tmp_path / "b", epochs=1))
+    a = state.weights(final_checkpoint(tmp_path / "a"))["model"]
+    b = state.weights(final_checkpoint(tmp_path / "b"))["model"]
+    for k in a:
+        assert torch.equal(a[k], b[k]), k
 
 
 def test_checkpoints_go_to_s3_and_resume_from_there(synthetic_data, tmp_path, s3_client):
@@ -261,7 +271,7 @@ def test_checkpoints_go_to_s3_and_resume_from_there(synthetic_data, tmp_path, s3
         synthetic_data, tmp_path, max_steps=6,
         checkpoint={"every_steps": 3, "keep_last": 2, "local_dir": str(tmp_path / "node1"), "s3_uri": "s3://checkpoints/test-run"},
     )  # fmt: skip
-    summary = train(config, s3_client=s3_client, tracker=NullTracker())
+    summary = train(config, s3_client=s3_client)
     assert summary.checkpoint_storage.startswith("s3://checkpoints/test-run")
     keys = {o["Key"] for o in s3_client.list_objects_v2(Bucket="checkpoints")["Contents"]}
     assert {"test-run/latest.json", "test-run/step-00000006.pt", "test-run/heartbeat.json"} <= keys
@@ -273,37 +283,49 @@ def test_checkpoints_go_to_s3_and_resume_from_there(synthetic_data, tmp_path, s3
             )
         }
     )
-    again = train(moved, s3_client=s3_client, tracker=NullTracker())
+    again = train(moved, s3_client=s3_client)
     assert again.resumed and again.resume["checkpoint_source"] == "remote"
 
 
-class RecordingTracker(NullTracker):
-    run_id = "run-123"
-
-    def __init__(self):
-        self.metrics: list[tuple[int, dict]] = []
-        self.params = {}
-        self.ended = None
-
-    def log_params(self, params):
-        self.params = params
-
-    def log_metrics(self, metrics, step):
-        self.metrics.append((step, metrics))
-
-    def end(self, status="FINISHED"):
-        self.ended = status
-
-
 def test_quality_and_system_metrics_are_separate(synthetic_data, tmp_path):
-    tracker = RecordingTracker()
-    train(make_config(synthetic_data, tmp_path, epochs=1), tracker=tracker)
-    names = {k for _, m in tracker.metrics for k in m}
-    assert {"quality/loss", "quality/lr", "system/images_per_s", "system/checkpoint_bytes"} <= names
+    logger = RecordingLogger()
+    train(make_config(synthetic_data, tmp_path, epochs=1), logger=logger)
+    names = {k for _, m in logger.metrics for k in m}
+    assert {
+        "quality/loss",
+        "quality/lr",
+        "quality/grad_norm",
+        "system/images_per_s",
+        "system/checkpoint_bytes",
+    } <= names
     assert any(n.startswith("quality/eval/") for n in names)
-    assert all(n.split("/")[0] in ("quality", "system") for n in names)
-    assert tracker.params["run_name"] == "test-run" and tracker.ended == "FINISHED"
-    assert final_weights(tmp_path)["extra"]["mlflow_run_id"] == "run-123"
+    # Lightning adds the epoch to every row it logs; everything else is ours.
+    assert all(n.split("/")[0] in ("quality", "system") for n in names - {"epoch"})
+    assert logger.params["run_name"] == "test-run" and logger.status == "success"
+    assert state.metadata(final_checkpoint(tmp_path))["mlflow_run_id"] == "run-123"
+
+
+def test_metric_logging_drops_missing_values():
+    from crosswalk.training import tracking
+
+    logger = RecordingLogger()
+    tracking.log_metrics([logger], {"a": 1, "b": None, "c": float("nan")}, step=3)
+    assert logger.metrics == [(3, {"a": 1.0})]
+    tracking.log_metrics([logger], {"b": None}, step=4)
+    assert len(logger.metrics) == 1
+
+
+def test_unreachable_mlflow_means_no_tracking_not_a_crash(monkeypatch):
+    import lightning.pytorch.loggers as loggers
+
+    from crosswalk.training import tracking
+
+    class Broken:
+        def __init__(self, **kwargs):
+            raise ConnectionError("no server")
+
+    monkeypatch.setattr(loggers, "MLFlowLogger", Broken)
+    assert tracking.make_logger("exp", "run", None) is None
 
 
 # -- Experiment B: kill mid-run, resume --------------------------------------------------
@@ -348,38 +370,8 @@ def test_resume_after_kill_matches_uninterrupted_run(synthetic_data, tmp_path):
     assert summary["resume"]["restore_s"] >= 0 and summary["resume"]["recovery_s"] > 0
     assert summary["final_step"] == 12
 
-    ref_state, run_state = final_weights(ref_dir), final_weights(run_dir)
-    assert run_state["progress"] == ref_state["progress"]
-    for key in ref_state["model"]:
-        assert torch.allclose(ref_state["model"][key], run_state["model"][key], atol=1e-6), key
-
-
-def test_mlflow_tracker_calls_with_a_fake_client(monkeypatch):
-    """MlflowTracker against a stand-in module (CI's mlflow-skinny has no SQL store)."""
-    import types
-
-    calls: list[tuple] = []
-
-    class Run:
-        info = types.SimpleNamespace(run_id="abc")
-
-    fake = types.ModuleType("mlflow")
-    fake.set_experiment = lambda name: calls.append(("experiment", name))
-    fake.start_run = lambda **kw: calls.append(("start", kw)) or Run()
-    fake.log_params = lambda p: calls.append(("params", dict(p)))
-    fake.log_metrics = lambda m, step: calls.append(("metrics", m, step))
-    fake.set_tags = lambda t: calls.append(("tags", t))
-    fake.end_run = lambda status: calls.append(("end", status))
-    monkeypatch.setitem(sys.modules, "mlflow", fake)
-
-    from crosswalk.training.tracking import MlflowTracker
-
-    tracker = MlflowTracker("exp", "run-a", run_id="abc")
-    assert ("start", {"run_id": "abc"}) in calls  # resume reattaches to the same run
-    tracker.log_params({f"k{i}": i for i in range(150)} | {"nested": {"x": None}})
-    batches = [c[1] for c in calls if c[0] == "params"]
-    assert [len(b) for b in batches] == [100, 51] and batches[1]["nested.x"] == ""
-    tracker.log_metrics({"quality/loss": 1, "system/x": None}, step=5)
-    assert ("metrics", {"quality/loss": 1.0}, 5) in calls
-    tracker.end("FAILED")
-    assert calls[-1] == ("end", "FAILED")
+    ref_ckpt, run_ckpt = final_checkpoint(ref_dir), final_checkpoint(run_dir)
+    assert state.metadata(run_ckpt)["progress"] == state.metadata(ref_ckpt)["progress"]
+    ref_w, run_w = state.weights(ref_ckpt)["model"], state.weights(run_ckpt)["model"]
+    for key in ref_w:
+        assert torch.allclose(ref_w[key], run_w[key], atol=1e-6), key

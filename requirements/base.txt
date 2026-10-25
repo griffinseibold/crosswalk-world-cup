@@ -9,6 +9,9 @@ boto3==1.43.118
 # librdkafka (manylinux_2_28), so no system library is needed. 2.16.0
 # (2026-10-07) wraps librdkafka 2.16.0.
 confluent-kafka==2.16.0
+# Runs the training loop (mixed precision, clipping, DDP, checkpoint state).
+# The unified "lightning" package; 2.6.6 (2026-09-10) supports torch < 2.10.
+lightning==2.6.6
 # mlflow-skinny: the tracking client without the server, UI or SQL storage
 # (the homelab runs the server). Same version as the server keeps the REST API
 # in step.

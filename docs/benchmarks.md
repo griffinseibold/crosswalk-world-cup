@@ -12,7 +12,7 @@ by hand.
 | Experiment | Question | Tool |
 | --- | --- | --- |
 | [A](#experiment-a-batching-strategies) | Batching: throughput against latency | `crosswalk benchmark` |
-| [B](#experiment-b-failure-recovery) | How much training is lost when a pod dies | Training loop's resume metrics |
+| [B](#experiment-b-failure-recovery) | How much training is lost when a pod dies | Resume metrics from the training job |
 | [C](#experiment-c-queueing-for-one-gpu) | How long GPU Jobs wait, and why | `scripts/experiment-c.py` |
 | [D](#experiment-d-streaming-pipeline-under-load) | Where the streaming pipeline saturates | `crosswalk replay` |
 | [T](#experiment-t-pytorch-against-triton) | In-process PyTorch against Triton Inference Server | `crosswalk triton-benchmark` |
@@ -124,7 +124,9 @@ progress is lost and how long until training is moving again?
 
 ### Method
 
-The training loop records what it needs:
+Lightning saves and restores the training state; a callback around it
+(`RecoveryCallback` in `src/crosswalk/training/callbacks.py`) records what
+this experiment needs:
 
 - a **heartbeat** (`heartbeat.json`: last completed step and wall time),
   written next to the checkpoints every `log_every_steps` steps;

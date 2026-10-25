@@ -255,7 +255,8 @@ scripts/submit-training.py benchmark --config configs/benchmark-a.yaml \
   submit again; training resumes from the checkpoint. Use a new `run_name`
   (in the config, or `--set run_name=...`) to start fresh.
 - **Several GPUs.** `--gpus N` (train only) launches `torchrun` with one
-  DistributedDataParallel process per GPU in one pod. `batch_size` in the
+  process per GPU in one pod; Lightning's DDP strategy picks up torchrun's
+  environment and averages gradients across them. `batch_size` in the
   config is per GPU, and the learning rate is not rescaled. The resume hash
   includes the world size, so a run cannot silently resume with a different
   global batch. This is for multi-GPU machines (for example a rented NVIDIA

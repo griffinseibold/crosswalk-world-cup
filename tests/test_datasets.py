@@ -215,7 +215,29 @@ def test_sampler_resumes_mid_epoch_on_the_same_batches():
     resumed = ResumableSampler(22, 4, seed=9)
     resumed.set_position(2, start_batch=3)
     assert list(resumed) == all_indices[12:]
-    assert len(resumed) == 8
+    # The length stays the full epoch: Lightning counts a resumed epoch's
+    # batches from where the checkpoint left off.
+    assert len(resumed) == 20
+
+
+def test_sampler_state_round_trip_and_epoch_changes():
+    epochs_seen = []
+    sampler = ResumableSampler(22, 4, seed=9, on_epoch=epochs_seen.append)
+    sampler.mark(1, 3)
+    assert sampler.state_dict() == {"epoch": 1, "start_batch": 3}
+    restored = ResumableSampler(22, 4, seed=9, on_epoch=epochs_seen.append)
+    restored.load_state_dict(sampler.state_dict())
+    assert (restored.epoch, restored.start_batch) == (1, 3)
+    # Lightning then calls set_epoch for the restored epoch: the position stays.
+    restored.set_epoch(1)
+    assert restored.start_batch == 3
+    # The next epoch starts from its first batch.
+    restored.set_epoch(2)
+    assert (restored.epoch, restored.start_batch) == (2, 0)
+    assert epochs_seen == [1, 2]
+    # A position at the end of an epoch is the start of the next one.
+    sampler.mark(1, 5)
+    assert sampler.state_dict() == {"epoch": 2, "start_batch": 0}
 
 
 def test_sampler_rejects_tiny_datasets():

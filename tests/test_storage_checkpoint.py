@@ -1,7 +1,7 @@
 """Storage backends and the checkpoint manager (no PyTorch needed).
 
 The same behavioural tests run against LocalStore and S3Store (moto), which is
-what justifies the training loop treating them interchangeably.
+what justifies training treating them interchangeably.
 """
 
 import json

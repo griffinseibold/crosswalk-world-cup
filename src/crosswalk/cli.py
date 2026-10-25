@@ -149,7 +149,7 @@ def cmd_triton_benchmark(args) -> int:
 
 def cmd_train(args) -> int:
     from crosswalk.config import TrainingConfig, load_config
-    from crosswalk.training.loop import train
+    from crosswalk.training.trainer import train
 
     config = load_config(TrainingConfig, args.config, args.overrides)
     summary = train(config)
@@ -159,7 +159,7 @@ def cmd_train(args) -> int:
 
 def cmd_evaluate(args) -> int:
     from crosswalk.config import TrainingConfig, load_config
-    from crosswalk.training.loop import evaluate_only
+    from crosswalk.training.trainer import evaluate_only
 
     config = load_config(TrainingConfig, args.config, args.overrides)
     print(json.dumps(evaluate_only(config, args.checkpoint), indent=2, default=str))

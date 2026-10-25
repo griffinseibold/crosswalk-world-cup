@@ -142,8 +142,9 @@ Every count on the leaderboard is only as good as the detections behind it.
 The pretrained detector was trained on everyday photos, not on cameras
 looking down at a crosswalk, so the project:
 
-- fine-tunes it on road scenes with a resumable training loop that logs
-  every run (parameters, metrics, dataset hash, model) to MLflow;
+- fine-tunes it on road scenes with PyTorch Lightning, resuming from its
+  last checkpoint after a crash, and logs every run (parameters, metrics,
+  dataset hash, model) to MLflow;
 - scores both the fine-tuned and the pretrained model on a hand-labelled set
   of frames from fixed crossing cameras (COCO mAP, per-class AP for
   pedestrians and cars);
@@ -181,7 +182,7 @@ The reference deployment is a single machine with one AMD Radeon RX 6900 XT
 | `src/crosswalk/indicators/` | Conflict indicators, camera configs and calibration |
 | `src/crosswalk/ranking/` | Ranking rules, statistics, SQLite store and the leaderboard page |
 | `src/crosswalk/stream/` | Kafka and in-memory event bus, stage runner, replay load tester |
-| `src/crosswalk/training/` | Datasets, training loop, checkpoints, evaluation, MLflow tracking |
+| `src/crosswalk/training/` | Fine-tuning with PyTorch Lightning: datasets, checkpoints on S3, evaluation, MLflow tracking |
 | `src/crosswalk/benchmark/` | Throughput and latency benchmarks |
 | `configs/` | Inference, stages, training, benchmark and camera configs |
 | `chart/crosswalk/` | Helm chart, Grafana dashboard and alert rules |

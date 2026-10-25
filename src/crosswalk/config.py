@@ -37,7 +37,7 @@ class ModelConfig(StrictModel):
     # download).
     weights: Literal["COCO_V1", "none"] = "COCO_V1"
     # A fine-tuned checkpoint to load instead: a local path or s3:// URI of a
-    # file written by the training loop. Its class names override `classes`.
+    # file written by `crosswalk train`. Its class names override `classes`.
     checkpoint: str | None = None
     # Project class names, index 0 excluded (TorchVision detection models keep
     # label 0 for background). None means the COCO categories of the weights.

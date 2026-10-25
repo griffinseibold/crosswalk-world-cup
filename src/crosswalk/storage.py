@@ -3,7 +3,7 @@
 Everything that persists state (checkpoints, detection files, footage) goes
 through :class:`Store`, which has two implementations with the same
 behaviour: :class:`S3Store` and :class:`LocalStore`. Tests run the same suite
-against both (S3 via moto), which is what lets the training loop fall back to
+against both (S3 via moto), which is what lets training fall back to
 local disk without a second code path.
 
 Atomicity:

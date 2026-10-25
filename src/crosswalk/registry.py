@@ -122,19 +122,18 @@ def write_model_files(
 
 
 def register_run_model(
-    run_id: str, name: str, model, classes, model_config: dict, info: dict, mlflow_module=None
+    run_id: str, name: str, model, classes, model_config: dict, info: dict
 ) -> str:
     """Log the model files to ``run_id`` and register them as a new version.
 
+    Uses the client API with an explicit run id, so it works whether or not
+    that run is the active one (Lightning's MLflow logger never makes it so).
     Returns the new version number.
     """
-    import mlflow as mlflow_default
-
-    mlflow = mlflow_module or mlflow_default
+    c = client()
     with tempfile.TemporaryDirectory() as tmp:
         write_model_files(tmp, model.state_dict(), classes, model_config, info)
-        mlflow.log_artifacts(tmp, artifact_path="model")
-    c = client()
+        c.log_artifacts(run_id, tmp, artifact_path="model")
     try:
         c.create_registered_model(name)
     except Exception as err:  # already exists
@@ -250,6 +249,6 @@ def load_any(uri: str, cache_dir: str = "/tmp/crosswalk-models") -> dict[str, An
     if is_registry_uri(uri):
         return load_weights(uri, cache_dir)
     from crosswalk.storage import fetch
-    from crosswalk.training.state import load_state
+    from crosswalk.training import state
 
-    return load_state(fetch(uri, cache_dir))
+    return state.weights(state.load_checkpoint(fetch(uri, cache_dir)))

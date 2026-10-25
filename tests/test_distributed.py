@@ -1,8 +1,8 @@
 """Data-parallel training: the sharding maths (no torch) and a real two-process
-run on CPU with the gloo backend (torch; CI runs it).
+Lightning DDP run on CPU with the gloo backend (torch; CI runs it).
 
 The two-process test is the same code path as N GPUs under torchrun, except
-for the backend (gloo instead of NCCL/RCCL) and the device binding.
+for the backend Lightning picks (gloo instead of NCCL/RCCL).
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ import yaml
 from crosswalk.config import TrainingConfig
 from crosswalk.training import distributed
 from crosswalk.training.distributed import DistInfo, ShardedSampler
-from crosswalk.training.loop import resume_hash
 from crosswalk.training.sampling import ResumableSampler
+from crosswalk.training.trainer import resume_hash
 from tests.conftest import subprocess_env
 
 # -- environment ------------------------------------------------------------------
@@ -34,21 +34,10 @@ def test_from_env_is_single_process_without_torchrun_variables():
     assert info.enabled and not info.is_main
 
 
-def test_backend_follows_the_device_not_the_vendor():
-    # torch's "nccl" is RCCL on ROCm builds, so GPUs of either vendor use it.
-    assert distributed.backend_for("cuda") == "nccl"
-    assert distributed.backend_for("cpu") == "gloo"
-
-
-def test_helpers_are_no_ops_for_one_process():
-    info = DistInfo()
-    assert distributed.init(info, "cpu") is None
-    sentinel = object()
-    assert distributed.wrap(sentinel, info, "cpu") is sentinel
-    assert distributed.unwrap(sentinel) is sentinel
-    assert distributed.broadcast_object(7, info) == 7
-    distributed.barrier(info)
-    distributed.shutdown(info)
+def test_local_world_size_follows_torchrun():
+    assert distributed.local_world_size({}) == 1
+    assert distributed.local_world_size({"WORLD_SIZE": "4", "LOCAL_WORLD_SIZE": "2"}) == 2
+    assert distributed.local_world_size({"WORLD_SIZE": "2"}) == 2
 
 
 # -- sharding -----------------------------------------------------------------------
@@ -171,11 +160,11 @@ def test_two_process_gloo_training_shards_checkpoints_once_and_pins_the_world_si
         "step-00000008.pt",
         "summary.json",
     ]
-    saved = state.load_state(str(ckpt / "step-00000008.pt"))
-    assert saved["progress"] == {"step": 8, "epoch": 2, "batch_in_epoch": 0}
-    # Saved from the unwrapped model: no DDP "module." prefix, so the weights
-    # load into a plain detector (inference, promotion, single-process resume).
-    assert not any(k.startswith("module.") for k in saved["model"])
+    saved = state.load_checkpoint(str(ckpt / "step-00000008.pt"))
+    assert state.metadata(saved)["progress"] == {"step": 8, "epoch": 2, "batch_in_epoch": 0}
+    # Saved from the Lightning module, not the DDP wrapper: no "module."
+    # prefix, so the weights load into a plain detector (inference, promotion).
+    assert not any(k.startswith("module.") for k in state.weights(saved)["model"])
 
     # Re-running with the same world size resumes the finished run...
     again = torchrun(cfg, 2)

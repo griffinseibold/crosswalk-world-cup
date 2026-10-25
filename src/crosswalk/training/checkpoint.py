@@ -24,8 +24,9 @@ local disk; the run keeps going and the failure is counted, logged and
 reported to MLflow (``system/checkpoint_upload_failures``). Resume considers
 both locations and takes the newest checkpoint that verifies.
 
-Nothing here imports PyTorch: the caller supplies ``write(path)`` and reads the
-returned path itself. That keeps this logic testable on any machine.
+Nothing here imports PyTorch: the caller supplies ``write(path)`` (in training,
+Lightning's ``trainer.save_checkpoint``) and reads the returned path itself.
+That keeps this logic testable on any machine.
 """
 
 from __future__ import annotations
@@ -79,6 +80,10 @@ class CheckpointManager:
     local_dir: str
     remote: Store | None = None
     keep_last: int = 3
+    # Where checkpoints downloaded from the remote go (default: local_dir).
+    # Extra processes of a multi-GPU run read local_dir but download into
+    # their own directory, so two processes never write the same file.
+    download_dir: str | None = None
     upload_failures: int = 0
     events: list[dict[str, Any]] = field(default_factory=list)
 
@@ -196,6 +201,9 @@ class CheckpointManager:
         local_path = Path(self.local_dir) / step_key(step)
         if source == "local":
             return local_path if local_path.exists() else None
+        if self.download_dir:
+            Path(self.download_dir).mkdir(parents=True, exist_ok=True)
+            local_path = Path(self.download_dir) / step_key(step)
         try:
             store.get_file(step_key(step), str(local_path))
             return local_path
@@ -210,6 +218,7 @@ def make_manager(
     local_dir: str,
     keep_last: int,
     s3_client=None,
+    download_dir: str | None = None,
 ) -> tuple[CheckpointManager, str]:
     """Build a manager; returns (manager, storage description for logs/MLflow)."""
     from crosswalk.storage import S3Store, parse_s3_uri
@@ -227,7 +236,7 @@ def make_manager(
             description = f"{store.uri} (local copy {local})"
         except Exception as err:
             log.warning("S3 unavailable at %s (%s): checkpoints stay local", uri, err)
-    return CheckpointManager(local, remote, keep_last), description
+    return CheckpointManager(local, remote, keep_last, download_dir=download_dir), description
 
 
 def _s3_configured() -> bool:

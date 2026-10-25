@@ -1,142 +1,114 @@
-"""MLflow tracking, kept behind a small interface.
+"""MLflow tracking through Lightning's ``MLFlowLogger``.
 
-Two metric namespaces, logged separately as the spec asks:
+Two metric namespaces, kept separate:
 
-- ``quality/...``: model quality (losses, mAP, per-class AP).
+- ``quality/...``: model quality (losses, learning rate, gradient norm, mAP,
+  per-class AP).
 - ``system/...``: infrastructure (images/s, step time, data-loader wait, GPU
   memory, checkpoint save/upload time and size, upload failures, resume
   recovery time and lost steps).
 
 Resuming reattaches to the same MLflow run (its id is stored in the
 checkpoint), so one training job is one MLflow run however many times it was
-killed. Metrics are logged with the global step, so the resumed curve
-continues where the checkpoint left off; steps between the checkpoint and the
-kill are logged twice, and that overlap is itself the "lost progress" that
-Experiment B measures.
+killed. Metrics are logged at the global step, so the resumed curve continues
+where the checkpoint left off; steps between the checkpoint and the kill are
+logged twice, and that overlap is itself the "lost progress" Experiment B
+measures.
 
-With tracking disabled (or MLflow unreachable at start), :class:`NullTracker`
-keeps the same interface and training proceeds.
+This module only adds what the logger does not do: connecting up front (so an
+unreachable server is reported at the start, not mid-run), tags and JSON
+artifacts on the run, and registering the finished model.
 """
 
 from __future__ import annotations
 
-import json
 import logging
+import math
 import os
-import tempfile
-from pathlib import Path
 from typing import Any
-
-from crosswalk.config import flatten
 
 log = logging.getLogger(__name__)
 
 
-class NullTracker:
-    run_id: str | None = None
+def make_logger(experiment: str, run_name: str, run_id: str | None):
+    """An ``MLFlowLogger`` already connected to its run, or None if MLflow is
+    unreachable. Training is the point: tracking failing is loud, not fatal."""
+    from lightning.pytorch.loggers import MLFlowLogger
 
-    def log_params(self, params: dict[str, Any]) -> None:
-        pass
-
-    def log_metrics(self, metrics: dict[str, float], step: int) -> None:
-        pass
-
-    def log_dict(self, data: dict[str, Any], name: str) -> None:
-        pass
-
-    def log_artifact(self, path: str, artifact_path: str | None = None) -> None:
-        pass
-
-    def set_tags(self, tags: dict[str, Any]) -> None:
-        pass
-
-    def register_model(
-        self, model, name: str | None, metadata: dict[str, Any], model_config=None
-    ) -> None:
-        pass
-
-    def end(self, status: str = "FINISHED") -> None:
-        pass
-
-
-class MlflowTracker:
-    def __init__(self, experiment: str, run_name: str, run_id: str | None = None):
-        import mlflow
-
-        self.mlflow = mlflow
-        mlflow.set_experiment(experiment)
-        if run_id:
-            self.run = mlflow.start_run(run_id=run_id)
-        else:
-            self.run = mlflow.start_run(run_name=run_name)
-        self.run_id = self.run.info.run_id
-
-    def log_params(self, params: dict[str, Any]) -> None:
-        # MLflow params are immutable: on resume the same values are logged
-        # again (allowed); a changed value raises, which is the right outcome.
-        flat = {k: ("" if v is None else str(v))[:6000] for k, v in flatten(params).items()}
-        items = list(flat.items())
-        for i in range(0, len(items), 100):  # MLflow's per-call limit
-            self.mlflow.log_params(dict(items[i : i + 100]))
-
-    def log_metrics(self, metrics: dict[str, float], step: int) -> None:
-        clean = {k: float(v) for k, v in metrics.items() if v is not None}
-        if clean:
-            self.mlflow.log_metrics(clean, step=step)
-
-    def log_dict(self, data: dict[str, Any], name: str) -> None:
-        self.mlflow.log_dict(data, name)
-
-    def log_artifact(self, path: str, artifact_path: str | None = None) -> None:
-        self.mlflow.log_artifact(path, artifact_path=artifact_path)
-
-    def set_tags(self, tags: dict[str, Any]) -> None:
-        self.mlflow.set_tags({k: str(v) for k, v in tags.items()})
-
-    def register_model(
-        self, model, name: str | None, metadata: dict[str, Any], model_config: dict | None = None
-    ) -> str | None:
-        """Log the fine-tuned model (state dict + config, see registry.py) and
-        register it as a new version of ``name``. Returns the version.
-
-        A new version gets no alias: it serves only after ``crosswalk
-        promote`` has compared it with the champion.
-        """
-        if not name:
-            return None
-        from crosswalk import registry
-
-        version = registry.register_run_model(
-            self.run_id,
-            name,
-            model,
-            metadata.get("classes", []),
-            model_config or {},
-            metadata,
-            self.mlflow,
-        )
-        log.info("registered %s version %s (no alias yet: run crosswalk promote)", name, version)
-        return version
-
-    def end(self, status: str = "FINISHED") -> None:
-        self.mlflow.end_run(status=status)
-
-
-def make_tracker(enabled: bool, experiment: str, run_name: str, run_id: str | None):
-    if not enabled:
-        return NullTracker()
     if not os.environ.get("MLFLOW_TRACKING_URI"):
         log.warning("MLFLOW_TRACKING_URI is not set; MLflow will write to ./mlruns")
     try:
-        return MlflowTracker(experiment, run_name, run_id)
+        logger = MLFlowLogger(
+            experiment_name=experiment,
+            run_name=run_name,
+            tracking_uri=os.environ.get("MLFLOW_TRACKING_URI"),
+            run_id=run_id,
+        )
+        logger.experiment  # noqa: B018 - connects and creates (or reopens) the run now
+        if logger.run_id is None:
+            raise RuntimeError("MLflow returned no run id")
+        return logger
     except Exception as err:
-        # Training is the point; tracking failing should be loud, not fatal.
         log.error("MLflow unavailable (%s); continuing without tracking", err)
-        return NullTracker()
+        return None
 
 
-def write_json_artifact(tracker, data: dict[str, Any], name: str) -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / name
-        path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
-        tracker.log_artifact(str(path))
+def run_id(logger) -> str | None:
+    return getattr(logger, "run_id", None) if logger is not None else None
+
+
+def _is_mlflow(logger) -> bool:
+    try:
+        from lightning.pytorch.loggers import MLFlowLogger
+    except ImportError:
+        return False
+    return isinstance(logger, MLFlowLogger)
+
+
+def set_tags(logger, tags: dict[str, Any]) -> None:
+    if _is_mlflow(logger):
+        for key, value in tags.items():
+            logger.experiment.set_tag(logger.run_id, key, str(value))
+
+
+def log_dict(logger, data: dict[str, Any], name: str) -> None:
+    if _is_mlflow(logger):
+        logger.experiment.log_dict(logger.run_id, data, name)
+
+
+def log_metrics(loggers, metrics: dict[str, Any], step: int) -> None:
+    """Log to every logger, dropping values that are None or NaN."""
+    clean = {
+        k: float(v)
+        for k, v in metrics.items()
+        if v is not None and not (isinstance(v, float) and math.isnan(v))
+    }
+    if not clean:
+        return
+    for logger in loggers or []:
+        logger.log_metrics(clean, step=step)
+
+
+def register_model(
+    logger, model, name: str | None, metadata: dict[str, Any], model_config: dict | None = None
+) -> str | None:
+    """Log the fine-tuned model (state dict + config, see registry.py) and
+    register it as a new version of ``name``. Returns the version.
+
+    A new version gets no alias: it serves only after ``crosswalk promote``
+    has compared it with the champion.
+    """
+    if not name or not _is_mlflow(logger):
+        return None
+    from crosswalk import registry
+
+    version = registry.register_run_model(
+        logger.run_id,
+        name,
+        model,
+        metadata.get("classes", []),
+        model_config or {},
+        metadata,
+    )
+    log.info("registered %s version %s (no alias yet: run crosswalk promote)", name, version)
+    return version
