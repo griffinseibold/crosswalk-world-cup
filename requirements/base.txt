@@ -5,6 +5,10 @@
 # av bundles its own FFmpeg in the wheel, so this pin is also the decoder pin.
 av==19.0.2
 boto3==1.43.118
+# Kafka client for the streaming stages. Wheels for Linux x86_64/aarch64 bundle
+# librdkafka (manylinux_2_28), so no system library is needed. 2.16.0
+# (2026-10-07) wraps librdkafka 2.16.0.
+confluent-kafka==2.16.0
 # mlflow-skinny: the tracking client without the server, UI or SQL storage
 # (the homelab runs the server). Same version as the server keeps the REST API
 # in step.

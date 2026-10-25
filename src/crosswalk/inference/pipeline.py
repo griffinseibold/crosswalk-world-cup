@@ -164,11 +164,15 @@ class InferenceWorker:
         clock: Callable[[], float] = time.monotonic,
         stats: RunStats | None = None,
         gpu_memory: Callable[[], int | None] | None = None,
+        on_error: Callable[[Batch, Exception], None] | None = None,
     ):
         self.batcher = batcher
         self.predictor = predictor
         self.metrics = metrics
         self.on_result = on_result
+        # Kafka mode waits on each frame's result; a failed batch must wake
+        # those waiters with the error instead of leaving them hanging.
+        self.on_error = on_error
         self.clock = clock
         self.stats = stats or RunStats()
         self.gpu_memory = gpu_memory
@@ -179,10 +183,12 @@ class InferenceWorker:
         started = self.clock()
         try:
             results = self.predictor.predict(batch.payloads)
-        except Exception:
+        except Exception as err:
             log.exception("inference failed for a batch of %d frames", len(batch))
             self.metrics.errors.labels(stage="inference").inc()
             self.stats.errors += 1
+            if self.on_error is not None:
+                self.on_error(batch, err)
             return
         finished = self.clock()
         timings = timings_for(batch, started, finished)

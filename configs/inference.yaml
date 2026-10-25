@@ -27,3 +27,12 @@ output:
   s3_prefix: null     # e.g. s3://datasets/detections/
 server:
   port: 8080
+# mode: kafka consumes frame events from the Rust sampler instead of decoding
+# files (chart: inference.mode). The broker comes from KAFKA_BOOTSTRAP_SERVERS.
+mode: file
+kafka:
+  group: crosswalk-inference
+  partitions: 3
+  max_records: 64
+  fetch_workers: 8
+  resize: null

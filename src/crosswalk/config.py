@@ -108,7 +108,39 @@ class ServerConfig(StrictModel):
     port: int = Field(8080, gt=0, lt=65536)
 
 
+class StreamConfig(StrictModel):
+    """Settings every Kafka stage shares. The broker address is not here: it
+    comes from ``KAFKA_BOOTSTRAP_SERVERS`` (set by the chart), like the S3
+    and MLflow endpoints."""
+
+    # Consumer group. Pods of one stage share it, so Kafka splits the input
+    # partitions between them; a different group gets its own full copy.
+    group: str | None = None
+    # Partitions for topics this stage creates (if missing). It caps how many
+    # pods of the *next* stage can share the work, so 3 leaves room to scale.
+    partitions: int = Field(3, ge=1)
+    replication_factor: int = Field(1, ge=1)
+    max_records: int = Field(64, ge=1)
+    poll_timeout_s: float = Field(1.0, gt=0)
+    # Extra attempts for an event that fails before it is dead-lettered.
+    retries: int = Field(2, ge=0)
+    # Recently processed event ids remembered for deduplication.
+    dedupe_capacity: int = Field(200_000, ge=1)
+
+
+class InferenceKafkaConfig(StreamConfig):
+    group: str | None = "crosswalk-inference"
+    # Frames are fetched from S3 into memory, never written to disk.
+    # Concurrent downloads keep the GPU fed while S3 round trips overlap.
+    fetch_workers: int = Field(8, ge=1, le=64)
+    # Resize fetched frames to this size before inference (None: as sent).
+    resize: tuple[int, int] | None = None
+
+
 class InferenceConfig(StrictModel):
+    # file: decode recorded footage directly (Milestones 1-2, unchanged).
+    # kafka: consume frame events from the sampler, publish detections.
+    mode: Literal["file", "kafka"] = "file"
     device: Device = "auto"
     precision: Literal["fp32", "fp16"] = "fp32"
     model: ModelConfig = Field(default_factory=ModelConfig)
@@ -116,6 +148,7 @@ class InferenceConfig(StrictModel):
     source: SourceConfig = Field(default_factory=SourceConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
+    kafka: InferenceKafkaConfig = Field(default_factory=InferenceKafkaConfig)
 
 
 class DatasetConfig(StrictModel):

@@ -17,6 +17,7 @@ authors = [{ name = "Griffin Seibold" }]
 dependencies = [
   "av",
   "boto3",
+  "confluent-kafka",
   "mlflow-skinny",
   "numpy",
   "pillow",

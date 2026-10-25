@@ -83,6 +83,46 @@ def _output_store(config: InferenceConfig):
     return None
 
 
+def load_predictor(config: InferenceConfig, metrics, state: dict[str, Any], shape, predictor=None):
+    """Load and warm up the detector (unless one is injected, as in tests).
+
+    ``shape`` is (width, height) of the frames it will see, so warmup runs the
+    shapes MIOpen/cuDNN will actually meet. Returns (predictor, gpu_memory),
+    where gpu_memory reports PyTorch's allocated bytes (None on CPU/fakes).
+    """
+    if predictor is not None:
+        metrics.set_model_info(model="external", weights=predictor.model_version)
+        return predictor, None
+    from crosswalk import device as devices
+    from crosswalk.inference.predictor import TorchPredictor
+
+    state["phase"] = "loading model"
+    predictor = TorchPredictor(config.model, config.device, config.precision)
+    info = devices.describe(predictor.device)
+    sizes = [1, config.batching.effective_batch_size]
+    if config.batching.strategy == "dynamic":
+        sizes = list(range(1, config.batching.max_batch_size + 1))
+    predictor.warmup((shape[1], shape[0]), sizes)
+
+    def gpu_memory():
+        return devices.memory_allocated(predictor.device)
+
+    metrics.set_model_info(
+        model=config.model.name,
+        weights=predictor.model_version,
+        device=info.get("gpu_name") or "cpu",
+        gpu_arch=info.get("gpu_arch"),
+        backend=info.get("gpu_backend") or "cpu",
+        torch=info.get("torch"),
+        hip=info.get("torch_hip"),
+        strategy=config.batching.strategy,
+        max_batch_size=config.batching.effective_batch_size,
+        precision=config.precision,
+    )
+    state["runtime"] = info
+    return predictor, gpu_memory
+
+
 def run(config: InferenceConfig, *, serve: bool, predictor=None) -> dict[str, Any]:
     metrics = Metrics()
     stop = threading.Event()
@@ -105,50 +145,32 @@ def run(config: InferenceConfig, *, serve: bool, predictor=None) -> dict[str, An
         for signum in (signal.SIGTERM, signal.SIGINT):
             previous_handlers[signum] = signal.signal(signum, handle_signal)
 
+    if config.mode == "kafka":
+        from crosswalk.inference.stream_mode import run_kafka
+
+        try:
+            return run_kafka(config, metrics, state, stop, server, predictor=predictor)
+        finally:
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
+            metrics.ready.set(0)
+            if server is not None:
+                server.stop()
+
     try:
         videos = _wait_for_videos(config, state, stop, server) if serve else resolve_videos(config)
         if not videos:
             return state  # stopped while waiting
         state["videos"] = [Path(v).name for v in videos]
 
-        gpu_memory = None
-        if predictor is None:
-            from crosswalk import device as devices
-            from crosswalk.inference.predictor import TorchPredictor
-
-            state["phase"] = "loading model"
-            if server is not None:
-                server.ready.clear()
-            predictor = TorchPredictor(config.model, config.device, config.precision)
-            info = devices.describe(predictor.device)
-            if config.source.resize:
-                shape = config.source.resize
-            else:
-                first = video.probe(videos[0])
-                shape = (first.width, first.height)
-            sizes = [1, config.batching.effective_batch_size]
-            if config.batching.strategy == "dynamic":
-                sizes = list(range(1, config.batching.max_batch_size + 1))
-            predictor.warmup((shape[1], shape[0]), sizes)
-
-            def gpu_memory():
-                return devices.memory_allocated(predictor.device)
-
-            metrics.set_model_info(
-                model=config.model.name,
-                weights=predictor.model_version,
-                device=info.get("gpu_name") or "cpu",
-                gpu_arch=info.get("gpu_arch"),
-                backend=info.get("gpu_backend") or "cpu",
-                torch=info.get("torch"),
-                hip=info.get("torch_hip"),
-                strategy=config.batching.strategy,
-                max_batch_size=config.batching.effective_batch_size,
-                precision=config.precision,
-            )
-            state["runtime"] = info
+        if config.source.resize:
+            shape = config.source.resize
         else:
-            metrics.set_model_info(model="external", weights=predictor.model_version)
+            first = video.probe(videos[0])
+            shape = (first.width, first.height)
+        if server is not None and predictor is None:
+            server.ready.clear()
+        predictor, gpu_memory = load_predictor(config, metrics, state, shape, predictor)
 
         metrics.ready.set(1)
         if server is not None:
