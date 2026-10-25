@@ -1,6 +1,6 @@
 """Build the detector: TorchVision FCOS-ResNet50-FPN, plus a tiny variant for tests.
 
-Why FCOS rather than Faster R-CNN (the other candidate in the spec):
+Why FCOS rather than Faster R-CNN:
 
 - It is single-stage and anchor-free: a convolutional backbone and FPN, then
   dense conv heads and one NMS. Faster R-CNN adds a region proposal stage,
@@ -10,9 +10,10 @@ Why FCOS rather than Faster R-CNN (the other candidate in the spec):
 - It needs about half the compute per image of Faster R-CNN v2 in
   TorchVision's published figures, which matters for real-time throughput on
   one consumer GPU and for fine-tuning in 16 GB.
-- Faster R-CNN v2 is more accurate on COCO. The project is about the platform
-  around the model, and FCOS is accurate enough for cars and pedestrians at
-  intersection scale; switching later only means adding a builder here.
+- Faster R-CNN v2 is more accurate on COCO. FCOS is accurate enough for cars
+  and pedestrians at intersection scale, and fine-tuning on the crossing
+  viewpoint matters more than the architecture; switching later only means
+  adding a builder here.
 
 TorchVision detection models keep class 0 for background, so project class
 ``i`` (0-based in the config) is label ``i + 1``.

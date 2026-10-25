@@ -1,6 +1,6 @@
 # Streaming pipeline
 
-How the Milestone 3 stages talk to each other through Kafka: the topics, the
+How the pipeline stages talk to each other through Kafka: the topics, the
 event formats, the delivery guarantees, and how each stage scales.
 
 ```text
@@ -26,7 +26,7 @@ s3://datasets/frames/<camera>/<clip>/<frame>.jpg
 Every stage also forwards `end` events, which mark the end of one pass over a
 clip, so the next stage can flush its state for that stream.
 
-- **Auto-creation is off** on the homelab broker. Each process creates the
+- **Auto-creation is off** on the reference broker. Each process creates the
   topics it reads and writes at startup, if missing, with replication factor 1
   (one broker). Several pods doing this at once is safe: the losers get
   "already exists", which counts as success.
@@ -54,7 +54,7 @@ this design:
 
 Exactly-once (Kafka transactions) would remove the duplicates at the source.
 It needs a transactional producer, read-committed consumers and a
-`transaction.state.log` the single-broker homelab would have to be configured
+`transaction.state.log` a single-broker cluster would have to be configured
 for. Idempotent consumers give the same visible result for this pipeline with
 far less machinery.
 

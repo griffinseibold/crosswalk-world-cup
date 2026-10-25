@@ -1,6 +1,6 @@
 # Versions, pinned. Each was checked against its project's releases in
 # October 2026; see README.md for the sources.
-k3s_version: v1.36.5+k3s1            # same k3s release as the homelab
+k3s_version: v1.36.5+k3s1            # same k3s release as the reference cluster
 nvidia_driver_branch: "580"          # Ubuntu's nvidia-driver-<branch>-server package
 nvidia_container_toolkit_version: "1.20.0-1"
 nvidia_device_plugin_chart_version: "0.20.0"

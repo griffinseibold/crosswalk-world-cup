@@ -59,7 +59,7 @@
         },
         "overrides": []
       },
-      "description": "1 once the detector is loaded and warmed up. 0 while loading, while waiting for footage, or when scaled to zero (the GPU may be held by the homelab LLM).",
+      "description": "1 once the detector is loaded and warmed up. 0 while loading, while waiting for footage, or when scaled to zero (another workload may hold the GPU).",
       "options": {
         "reduceOptions": {
           "calcs": [

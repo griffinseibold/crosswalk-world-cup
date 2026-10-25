@@ -1,7 +1,7 @@
-# Register Crosswalk World Cup with the homelab's Argo CD (once):
+# Register Crosswalk World Cup with Argo CD (once):
 #   kubectl --context kind-homelab-dev apply -f deploy/argocd-application.yaml
-# Before the first sync, create the S3 credentials from the homelab repo:
-#   ./scripts/ml-credentials.sh crosswalk
+# Before the first sync, create the S3 credentials Secret (docs/deployment.md):
+#   kubectl -n crosswalk create secret generic s3-credentials ...
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -14,7 +14,7 @@ spec:
     path: chart/crosswalk
     targetRevision: main
     helm:
-      # CPU fallback until the homelab runs AMD's GPU device plugin. To use
+      # CPU fallback until the cluster runs AMD's GPU device plugin. To use
       # the GPU, build the ROCm image on the host (scripts/build-rocm-image.sh)
       # and set these from the Argo CD UI or here:
       #   gpu.enabled=true, image.gpu.tag=<tag the script printed>

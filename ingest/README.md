@@ -25,7 +25,7 @@ Recorded footage only. Inputs are files or directories, never camera URLs
 | [rskafka](https://github.com/influxdata/rskafka) 0.6.0, not rdkafka | Pure Rust: the build needs no C toolchain, cmake or OpenSSL. rdkafka wraps librdkafka, which is compiled from C. The sampler only produces, so rskafka's missing consumer groups do not matter. It partitions with Kafka's own murmur2 algorithm (tested against librdkafka's vectors), so all frames of one camera stay on one partition, in order. |
 | Hand-written S3 SigV4 over [ureq](https://github.com/algesten/ureq) 3.5.0 | Two calls (PUT object, HEAD bucket) against one in-cluster endpoint. `aws-sdk-s3` brings around 200 crates and a TLS stack for that. The signer is tested against AWS's published worked examples, signature for signature. |
 | Image in S3, pointer in Kafka | Kafka is built for many small records, not 100 kB images (broker memory, the 1 MB default message limit). The image is uploaded first, so an event never points at a missing object. |
-| No TLS | The homelab S3 and Kafka are plain-text Services inside the cluster. An `https://` S3 endpoint is refused at startup with an explanation. Adding TLS means enabling ureq's `rustls` feature and rskafka's `transport-tls`. |
+| No TLS | The cluster's S3 and Kafka are plain-text Services inside the cluster. An `https://` S3 endpoint is refused at startup with an explanation. Adding TLS means enabling ureq's `rustls` feature and rskafka's `transport-tls`. |
 
 ## Behaviour
 

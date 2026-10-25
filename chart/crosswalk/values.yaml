@@ -27,14 +27,12 @@ gpu:
   # false: no GPU request, CPU image (CI, smoke tests, and the fallback while
   # the cluster has no GPU device plugin).
   #
-  # amd.com/gpu is advertised by AMD's Kubernetes device plugin. Until the
-  # homelab installs it, a pod requesting it stays Pending forever with
-  # "Insufficient amd.com/gpu"; use gpu.enabled=false until then.
+  # amd.com/gpu is advertised by AMD's Kubernetes device plugin. On a
+  # cluster without it, a pod requesting it stays Pending forever with
+  # "Insufficient amd.com/gpu"; use gpu.enabled=false there.
   #
-  # The homelab has ONE physical GPU, which its on-demand LLM also uses. Only
-  # one pod can hold it at a time: a GPU pod here waits Pending while the LLM
-  # runs (./scripts/lab-mode.py status in the homelab repo shows who holds it;
-  # the LLM stops five minutes after nothing requests it).
+  # The reference cluster has ONE physical GPU. Only one pod can hold it at a
+  # time: a GPU pod here waits Pending while another workload holds it.
   enabled: false
   # amd.com/gpu (AMD device plugin, the homelab) or nvidia.com/gpu (NVIDIA
   # device plugin, e.g. the rented-VM setup in deploy/nvidia/). Use
@@ -56,9 +54,7 @@ gpu:
 
 namespace:
   create: true
-  # The homelab Gateway admits routes only from namespaces with this label.
-  # This app does not use the homelab LLM, so it does NOT carry
-  # homelab.local/llm: requested anywhere.
+  # The cluster's Gateway admits routes only from namespaces with this label.
   labels:
     gateway.homelab/access: public
 
@@ -191,8 +187,8 @@ job:
   # Generate the synthetic dataset into /scratch/data/synthetic first.
   synthetic: false
   # GPUs for a train Job. >1 launches torchrun with one DistributedDataParallel
-  # process per GPU (batch_size in the config is then per GPU). The homelab
-  # has one GPU, so Kueue would never admit more: this is for multi-GPU
+  # process per GPU (batch_size in the config is then per GPU). The reference
+  # cluster has one GPU, so Kueue would never admit more: this is for multi-GPU
   # machines such as a rented NVIDIA VM (deploy/nvidia/, kueue.enabled=false).
   gpus: 1
   # Extra environment for the main container, e.g. fault injection for

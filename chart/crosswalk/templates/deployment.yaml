@@ -5,7 +5,6 @@ metadata:
   labels:
     {{- include "crosswalk.labels" . | nindent 4 }}
     app.kubernetes.io/component: inference
-    # Deliberately no homelab.local/llm label: this app does not use the LLM.
 spec:
   replicas: {{ .Values.inference.replicaCount }}
   # Recreate, not RollingUpdate: with one GPU, a new pod cannot start until

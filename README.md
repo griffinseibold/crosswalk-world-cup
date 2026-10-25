@@ -1,157 +1,210 @@
 # Crosswalk World Cup
 
-A GPU computer-vision platform that runs on one AMD graphics card in a
-homelab. It finds cars and pedestrians in recorded road footage and will one
-day rank intersections against each other in a crosswalk leaderboard.
+**Which crosswalk in the world is the safest to cross?**
 
-> The computer vision is the workload. The GPU platform is the accomplishment.
-> The leaderboard is the hook.
+Crosswalk World Cup tries to answer that from video. It watches recorded
+footage of pedestrian crossings, finds every pedestrian and vehicle, follows
+them through the scene, and measures how often people on foot and vehicles
+come uncomfortably close. Crossings are then ranked against each other on a
+public leaderboard, with the uncertainty of every number shown next to it.
 
-The detector is an off-the-shelf TorchVision model. What this repository is
-really about is everything around it: serving it on a GPU inside Kubernetes
-with dynamic batching and real metrics, fine-tuning it with a training loop
-that survives being killed, tracking every run in MLflow, and measuring all of
-it in a way someone else could reproduce.
+The rules are the same for every crossing: same detector, same thresholds,
+same minimum amount of footage, same statistics. A crossing tops the table
+only when the data shows few near misses *and* there is enough footage to
+believe it.
 
-## Scope and safety limits
+> The leaderboard compares observable indicators from recorded footage. It is
+> an experiment, not a risk model and not safety advice. A crossing near the
+> top is one where little conflict was *seen*, not a guarantee of anything.
+> [What the numbers do not tell you](docs/indicators.md#what-the-numbers-do-not-tell-you).
 
-- **Recorded footage only.** No live camera feeds, RTSP or webcams, by design.
-- **Faces and licence plates are blurred before footage is stored.** Blurring
-  does not grant permission to use footage; see [data handling](docs/data.md).
-- **BDD100K is not downloaded by this code.** Its licence is non-commercial
-  and needs registration; you point the config at your own copy.
-- **No invented numbers.** [Benchmarks](docs/benchmarks.md) has the method
-  and empty results tables. They get filled in from real runs on the homelab.
-
-## Architecture
+## How a crossing is scored
 
 ```text
-Recorded footage (blurred) ──► s3://datasets/footage/
-                                     │
-               ┌─────────────────────┴───────────────────────────┐
-               │  crosswalk namespace (Argo CD, chart/crosswalk)  │
-               │                                                  │
-               │  inference Deployment (1 GPU)                    │
-               │    PyAV decode ─► dynamic batcher ─► FCOS ─► JSONL ──► s3://datasets/detections/
-               │        │                                        │
-               │        └─ /metrics ─► Prometheus ─► Grafana dashboard
-               │           /status  ─► http://crosswalk.localhost:8080
-               │                                                  │
-               │  one-off Jobs (scripts/submit-training.py)       │
-               │    validate   Milestone 0 GPU check              │
-               │    benchmark  Experiment A ──► s3://datasets/results/
-               │    train      custom loop ──► s3://checkpoints/<run>/
-               │                    └──────────► MLflow (params, metrics,
-               │                                  artifacts, model registry)
-               └──────────────────────────────────────────────────┘
+recorded clip of a crossing (faces and plates blurred)
+   │
+   ▼
+frame sampler ─► detector ─► tracker ─► conflict indicators ─► ranking ─► leaderboard
+(Rust, 5 fps)    (FCOS, GPU)  (Kalman +   (per 60 s window)      (per crossing,
+                              Hungarian)                          with 95% intervals)
 ```
 
-Everything runs on ROCm. PyTorch's ROCm build exposes AMD GPUs through the
-`torch.cuda` API, so the code asks for a device (`auto`, `gpu`, `rocm`,
-`cuda`, `cpu`) and never branches on the vendor. The vendor shows up in only
-two places: the container image (`docker/Dockerfile.rocm`) and the facts
-recorded with each result (`src/crosswalk/device.py`, `hardware.py`). A
-CUDA image would be one more Dockerfile; no code changes.
+1. **Sample.** The clip is decoded with FFmpeg and sampled a few times a
+   second. Each frame becomes an event on Kafka; the image goes to object
+   storage.
+2. **Detect.** A TorchVision FCOS detector finds pedestrians, cars, trucks,
+   buses, bicycles and motorcycles in each frame, on the GPU, with dynamic
+   batching.
+3. **Track.** Detections are linked into tracks across frames (constant-velocity
+   Kalman filter, Hungarian assignment), so one person crossing the road is
+   one pedestrian, not a hundred detections.
+4. **Measure.** For each minute of video, the indicators stage counts how
+   people and vehicles interacted inside the crosswalk's region of interest:
+   close approaches, minimum separation, crossing paths, time to collision
+   (TTC) and post-encroachment time (PET). With a calibrated camera these are
+   in metres and seconds on the road plane.
+5. **Rank.** Windows are summed per crossing and normalised by how much foot
+   traffic was actually observed. Crossings are ordered by the upper end of a
+   95% confidence interval, so a short, lucky clip cannot win.
 
-| Path | What it is |
+The whole pipeline runs end to end on a laptop (generated footage, no GPU or
+Kafka needed) and on a Kubernetes cluster with one GPU for real footage.
+
+## What "safest" means here
+
+The headline number is **close approaches per 100 pedestrian-minutes**: how
+many times a pedestrian and a vehicle came within 2 m of each other (on a
+calibrated camera), for every 100 minutes that people spent at the crossing.
+
+| Rule | Why |
 | --- | --- |
-| `src/crosswalk/inference/` | Decoding, batcher, predictor, metrics, status server, service loop |
-| `src/crosswalk/benchmark/` | Experiment A harness and result schema |
-| `src/crosswalk/training/` | Datasets, hashing, checkpoints, the training loop, evaluation, MLflow |
-| `src/crosswalk/validate.py` | Milestone 0 GPU validation |
-| `configs/` | Inference, Experiment A, BDD100K training, synthetic smoke run |
-| `chart/crosswalk/` | Helm chart: Deployment, Jobs, ServiceMonitor, route, dashboard |
-| `docker/` | ROCm image (built on the homelab) and CPU image (built by CI) |
-| `scripts/` | Build the ROCm image into the cluster; submit Jobs |
-| `tests/` | pytest suite, CPU-only, including a kill-and-resume training test |
+| Normalise by pedestrian exposure | Raw counts would just rank crossings by how busy they are |
+| Exact 95% Poisson interval on every rate | Small numbers are noisy; the interval says how noisy |
+| Rank by the interval's upper bound, lowest first | The highest rate the data cannot rule out. Zero events in five minutes is not a win |
+| At least 10 minutes of video, 5 windows and 30 pedestrian-minutes | Below that, a crossing is listed as "not ranked yet", with the reason |
+| Calibrated (metres) and uncalibrated (pixels) crossings in separate tables | Pixel distances depend on camera height and angle and cannot be compared across cameras |
+| Each pair of tracks counts at most once per window | A pedestrian waiting next to a parked car is one close approach, not 150 |
 
-## What it demonstrates
+TTC and PET are long-established surrogate safety measures in traffic
+engineering (FHWA's SSAM uses TTC ≤ 1.5 s). They are reported for every
+calibrated crossing alongside the headline rate.
 
-| Skill | Where |
+Full definitions: [conflict indicators](docs/indicators.md) and
+[ranking rules](docs/ranking.md).
+
+## The leaderboard
+
+The ranking service serves one self-contained page (no external requests,
+light and dark, works on a phone) and a JSON API:
+
+| Path | What |
 | --- | --- |
-| GPU inference serving on Kubernetes | Inference Deployment: GPU request, startup/readiness probes, Recreate rollout for one GPU, ServiceMonitor |
-| Batching and the latency/throughput trade-off | `inference/batcher.py`: sequential, fixed and dynamic (max batch + max wait) strategies; Experiment A measures them |
-| Observability | Prometheus histograms for p50/p95/p99 latency, queue wait, batch size, drops, errors, model version; Grafana dashboard |
-| Reproducible benchmarking | Every result records hardware, kernel, ROCm, PyTorch and HIP versions, model, config hash and method |
-| Writing a training loop, not configuring one | `training/loop.py`: optimizer, LR schedule, AMP, clipping, checkpointing and resume written out |
-| Fault tolerance | Atomic checkpoints to S3 with local fallback, exact mid-epoch resume, Experiment B measures recovery |
-| ML lifecycle tooling | MLflow params, metrics, artifacts and model registry; dataset content hashes |
-| Model evaluation | COCO mAP with pycocotools, fine-tuned model vs. pretrained baseline on a hand-labeled set |
-| AMD/ROCm platform work | ROCm image, device-plugin GPU scheduling, MIOpen cache, vendor-agnostic code |
+| `/` | The leaderboard: ranked crossings, rates with intervals, rank changes over the last day, and crossings not ranked yet |
+| `/api/leaderboard` | The same data as JSON, with the footage source and licence for each crossing |
+| `/api/crossings?camera=<id>` | Every stored window for one crossing |
+| `/api/history` | Recent leaderboard snapshots |
 
-## Quickstart (CPU, no cluster)
+Every crossing carries its footage source, licence and attribution, and the
+time its numbers were computed.
 
-Python 3.12 or newer.
+## Try it locally
+
+Python 3.12 or newer. No GPU, Kafka or object storage needed.
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
 pip install --requirement requirements/cpu.txt --requirement requirements/dev.txt
 pip install --no-deps --editable .
+
+crosswalk demo demo-out --serve
+```
+
+`crosswalk demo` generates two crossings, one where drivers yield and one
+where they do not, and runs them through the real tracking, indicators and
+ranking code. It prints the resulting table and serves the leaderboard at
+<http://localhost:8000>. (The demo finds the generated shapes with a simple
+colour detector, because a model trained on real photos sees nothing in
+coloured rectangles. Everything after detection is production code.)
+
+Add `--video` to encode the scene as a real clip and decode it with PyAV, or
+`--ingest-bin ingest/target/release/crosswalk-ingest` to sample it with the
+Rust frame sampler (`cargo build --release` in `ingest/`).
+
+Run the tests:
+
+```bash
 pytest
 ```
 
-Try the platform end to end on synthetic data in a couple of minutes:
+## Adding a crossing
 
-```bash
-crosswalk make-synthetic /tmp/cw --video
-crosswalk validate --device cpu --model fcos_tiny --height 64 --width 96 --steps 3
+1. **Footage.** A fixed camera overlooking one crosswalk, at least 10
+   minutes of it. Only recorded, openly licensed or self-recorded footage,
+   with faces and licence plates blurred before it is stored. See
+   [data handling](docs/data.md) and the researched list of
+   [candidate sources](docs/data-sources.md).
+2. **Camera config.** `configs/cameras/<camera>.yaml` names the crossing,
+   draws the region of interest around the crosswalk, and records the
+   footage's source, licence and attribution.
+3. **Calibration (recommended).** Four image points with known positions on
+   the road, usually the crosswalk's corners, turn pixels into metres. This
+   moves the crossing into the metric table and unlocks TTC and PET.
+4. Upload the clip and let the pipeline run. The crossing appears under
+   "not ranked yet" until it has enough footage.
 
-# Train (tracking off: no MLflow server needed)
-crosswalk train --config configs/train-synthetic.yaml \
-  --set data.train.labels=/tmp/cw/det_train.json --set data.train.images=/tmp/cw/images \
-  --set data.eval.labels=/tmp/cw/instances.json --set data.eval.images=/tmp/cw/images \
-  --set checkpoint.local_dir=/tmp/cw/ckpt --set tracking.enabled=false
+## Accuracy of the detector
 
-# Kill it mid-run and run the same command again: it resumes from the last
-# checkpoint and reports lost steps and recovery time.
-```
+Every count on the leaderboard is only as good as the detections behind it.
+The pretrained detector was trained on everyday photos, not on cameras
+looking down at a crosswalk, so the project:
 
-Detection on the test clip (downloads the pretrained COCO weights once):
+- fine-tunes it on road scenes with a resumable training loop that logs
+  every run (parameters, metrics, dataset hash, model) to MLflow;
+- scores both the fine-tuned and the pretrained model on a hand-labelled set
+  of frames from fixed crossing cameras (COCO mAP, per-class AP for
+  pedestrians and cars);
+- only promotes a new model to the leaderboard if it does not get worse at
+  finding pedestrians (`crosswalk promote`, with `crosswalk rollback` to undo).
 
-```bash
-crosswalk infer --config configs/inference.yaml \
-  --set 'source.videos=[/tmp/cw/clip.mp4]' --set output.dir=/tmp/cw/out --set source.resize=null
-```
+## Running it on a cluster
 
-## On the homelab
+The full pipeline runs on Kubernetes: the Rust sampler, the GPU inference
+service, the tracking, indicators and ranking stages, Kafka between them,
+Prometheus metrics and alerts, and a Grafana dashboard. One Helm chart
+deploys everything (`chart/crosswalk`), and Argo CD keeps it in sync.
 
-[Running on the homelab](docs/running-on-the-homelab.md) has the full steps.
-In short:
+The reference deployment is a single machine with one AMD Radeon RX 6900 XT
+(ROCm 7.2). The same code runs on NVIDIA GPUs with the CUDA image and
+`values-nvidia.yaml`; device selection never branches on the vendor.
 
-1. In the homelab repo: `./scripts/ml-credentials.sh crosswalk`.
-2. `kubectl --context kind-homelab-dev apply -f deploy/argocd-application.yaml`.
-   Argo CD deploys the chart. It runs on CPU until the GPU is set up.
-3. Build the ROCm image on the host and load it into the cluster:
-   `scripts/build-rocm-image.sh`.
-4. Once the homelab runs AMD's GPU device plugin, run Milestone 0 first:
-   `scripts/submit-training.py validate --image-tag <tag>`.
-5. Then set `gpu.enabled=true` and `image.gpu.tag=<tag>` on the Argo CD
-   application.
+- [Deployment](docs/deployment.md): images, GPU scheduling, credentials,
+  the streaming pipeline, training and benchmark Jobs, troubleshooting.
+- [Streaming](docs/streaming.md): topics, event formats, delivery
+  guarantees, dead letters, scaling.
+- [Benchmarks](docs/benchmarks.md): how throughput, latency, failure
+  recovery and model quality are measured. Results are added only from real
+  runs.
+- [NVIDIA](deploy/nvidia/README.md): running the same pipeline and
+  benchmarks on a rented NVIDIA GPU.
 
-There is one GPU, and the homelab's on-demand language model uses it too. A
-GPU pod here waits Pending while the model runs. The homelab's
-`./scripts/lab-mode.py status` shows who holds it.
+## Repository layout
 
-## Roadmap
+| Path | What it is |
+| --- | --- |
+| `ingest/` | Rust frame sampler: FFmpeg decode, sampling, JPEGs to S3, frame events to Kafka |
+| `src/crosswalk/inference/` | GPU detection service: decoding, dynamic batcher, predictor, metrics |
+| `src/crosswalk/tracking/` | Multi-object tracking within one clip |
+| `src/crosswalk/indicators/` | Conflict indicators, camera configs and calibration |
+| `src/crosswalk/ranking/` | Ranking rules, statistics, SQLite store and the leaderboard page |
+| `src/crosswalk/stream/` | Kafka and in-memory event bus, stage runner, replay load tester |
+| `src/crosswalk/training/` | Datasets, training loop, checkpoints, evaluation, MLflow tracking |
+| `src/crosswalk/benchmark/` | Throughput and latency benchmarks |
+| `configs/` | Inference, stages, training, benchmark and camera configs |
+| `chart/crosswalk/` | Helm chart, Grafana dashboard and alert rules |
+| `deploy/` | Argo CD application; Ansible for an NVIDIA GPU machine |
+| `docker/` | CPU, ROCm and CUDA images |
+| `scripts/` | Build the GPU image, submit Jobs, queueing experiment |
+| `tests/` | pytest suite (CPU only), including an end-to-end pipeline test |
 
-| Milestone | Status | What |
-| --- | --- | --- |
-| 0. Validate the stack | Built, not yet run on the card | `crosswalk validate`: a few detector training steps on gfx1030, printing device, HIP version and throughput. The RX 6900 XT shares gfx1030 with AMD's supported Radeon PRO W6800, but is not on AMD's official list itself. |
-| 1. GPU inference on Kubernetes | Built, not yet run on the card | FCOS on recorded footage; dynamic batching; Prometheus metrics and dashboard; JSON-lines detections; Experiment A harness |
-| 2. PyTorch training platform | Built, not yet run on the card | Custom loop; S3 checkpoints with resume; MLflow tracking and registry; dataset hashing; mAP vs. baseline; Experiment B |
-| 3. Streaming and the leaderboard | Not started | Kafka topics for frames and detections, a Rust ingestion service, multi-object tracking to count crossings, the crosswalk leaderboard |
-| 4. NVIDIA (optional) | Not started | A CUDA image as a drop-in; the same benchmarks on an NVIDIA card for a cross-vendor comparison |
+## Status
 
-Milestone 3 is where this becomes a streaming system: detections go out
-as events, tracks turn into "a pedestrian crossed here" facts, and the
-leaderboard ranks intersections. The JSON-lines records written today
-(`docs/benchmarks.md#detection-output`) are shaped to become those events.
+| | Status |
+| --- | --- |
+| Pipeline (sampler → detector → tracker → indicators → ranking → leaderboard) | Built and tested end to end on generated footage |
+| Cluster deployment, metrics, alerts | Built; first GPU run pending |
+| Detector fine-tuning and evaluation | Built; waiting for the hand-labelled fixed-camera set |
+| Crossings on the leaderboard | None yet. First candidate: NGSIM Lankershim Boulevard, Los Angeles, once its video licence is confirmed |
 
-## Learn more
+Next: the first real crossings, calibrated, with enough footage to rank.
 
-- [Running on the homelab](docs/running-on-the-homelab.md): images, GPU
-  scheduling, credentials, deploying, submitting Jobs, troubleshooting.
-- [Benchmarks](docs/benchmarks.md): methodology and result templates for
-  Experiments A and B; output schemas.
-- [Data](docs/data.md): datasets, licences, privacy, labeling the eval set.
+## Scope and limits
+
+- **Recorded footage only.** No live camera feeds, RTSP or webcams, by design.
+- **Faces and licence plates are blurred before footage is stored.** Blurring
+  does not grant permission to use footage; see [data handling](docs/data.md).
+- **No re-identification.** Tracks never leave the clip they came from.
+- **BDD100K is not downloaded by this code.** Its licence is non-commercial
+  and needs registration; you point the config at your own copy.
+- **No invented numbers.** Every number on the leaderboard and in the
+  benchmarks comes from a real run with its result file.

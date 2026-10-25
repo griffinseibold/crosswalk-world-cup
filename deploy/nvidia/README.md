@@ -49,7 +49,7 @@ The playbook, in order (each step is idempotent, so re-running is safe):
 | --- | --- | --- |
 | NVIDIA driver from Ubuntu (`nvidia-driver-580-server`), reboot if new | branch 580 | Ubuntu archive |
 | NVIDIA Container Toolkit, apt repository from NVIDIA's install guide | 1.20.0 | [install guide](https://github.com/NVIDIA/cloud-native-docs/blob/main/container-toolkit/install-guide.md), [releases](https://github.com/NVIDIA/nvidia-container-toolkit/releases) |
-| k3s with `default-runtime: nvidia` (k3s detects the NVIDIA runtime at start) | v1.36.5+k3s1, as on the homelab | [k3s: NVIDIA Container Runtime Support](https://docs.k3s.io/advanced) |
+| k3s with `default-runtime: nvidia` (k3s detects the NVIDIA runtime at start) | v1.36.5+k3s1, as on the reference cluster | [k3s: NVIDIA Container Runtime Support](https://docs.k3s.io/advanced) |
 | NVIDIA device plugin with **time-slicing** (`gpu_time_slicing_replicas`, default 4) | chart 0.20.0 | [k8s-device-plugin](https://github.com/NVIDIA/k8s-device-plugin) |
 | DCGM exporter (GPU utilisation, memory, power, temperature on :9400) | chart 4.8.4 | [dcgm-exporter](https://github.com/NVIDIA/dcgm-exporter) |
 | A smoke pod: PyTorch in the CUDA base image sees the GPU through Kubernetes | `pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime` | |

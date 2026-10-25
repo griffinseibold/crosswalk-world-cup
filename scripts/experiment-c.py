@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Experiment C: queueing for one GPU with Kueue, and the homelab LLM.
+"""Experiment C: queueing for one GPU with Kueue, with and without a competing workload.
 
 Submits N competing GPU Jobs through scripts/submit-training.py (so each is
 queued by Kueue), waits for them to finish, and records for each one when it
@@ -8,20 +8,20 @@ completed. From those it derives:
 
 - **queue wait**: created -> Kueue admission (waiting for quota);
 - **scheduling wait**: admission -> pod running (Kueue said yes but the GPU
-  was still held by something Kueue does not manage, such as the LLM);
+  was still held by something Kueue does not manage);
 - **run time**: running -> completed;
 - **turnaround**: created -> completed.
 
 It also writes the PromQL queries for GPU utilisation over the experiment's
-window (from the homelab's node-exporter drm/hwmon metrics), so the run can
+window (from node-exporter's drm/hwmon metrics), so the run can
 be lined up with what the GPU was doing. It never changes the cluster
-beyond submitting the Jobs: making the LLM compete is a manual step (see
-docs/benchmarks.md, Experiment C), so this script cannot switch the user's
-cluster into llm mode by accident.
+beyond submitting the Jobs: starting the competing workload is a manual
+step (see docs/benchmarks.md, Experiment C), so this script never takes the
+GPU away from something else by accident.
 
     scripts/experiment-c.py --jobs 3 --kind validate --image-tag rocm-abc1234
     scripts/experiment-c.py --jobs 3 --kind train --config configs/train-synthetic.yaml \\
-        --synthetic --set max_steps=200 --image-tag rocm-abc1234 --label llm-running
+        --synthetic --set max_steps=200 --image-tag rocm-abc1234 --label gpu-contended
 
 Pure-stdlib apart from kubectl and helm on PATH; the timeline maths is
 importable and unit-tested (tests/test_experiment_c.py).
@@ -42,7 +42,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 SUBMIT = REPO / "scripts" / "submit-training.py"
 
-# Queries for the homelab's GPU metrics (node-exporter drm and hwmon
+# Queries for the GPU metrics (node-exporter drm and hwmon
 # collectors). Evaluate them over [start, end] in Grafana or the Prometheus
 # API; the script records the window.
 GPU_QUERIES = {
@@ -157,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         "--cpu", action="store_true", help="CPU image, no GPU request (dry wiring check)"
     )
     p.add_argument(
-        "--label", default="", help="free text recorded with the result, e.g. llm-running"
+        "--label", default="", help="free text recorded with the result, e.g. gpu-contended"
     )
     p.add_argument("--namespace", default="crosswalk")
     p.add_argument(

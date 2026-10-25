@@ -75,7 +75,7 @@ def test_default_render_follows_the_homelab_contract():
     assert len(dashboards) == 1
 
 
-def test_nothing_requests_the_homelab_llm():
+def test_nothing_requests_the_cluster_llm():
     for args in ([], ["--set", "gpu.enabled=true", "--set", "image.gpu.tag=rocm-x"]):
         for doc in render(*args):
             labels = doc["metadata"].get("labels", {})

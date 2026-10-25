@@ -35,7 +35,7 @@ rules apply to every clip, whoever recorded it:
    Delete blurred clips when they are no longer used.
 5. **No re-identification.** Nothing in this project tries to recognise,
    track across clips, or link a detection to a specific person or vehicle.
-   Milestone 3's tracking only follows a box from frame to frame within one
+   The tracker only follows a box from frame to frame within one
    clip to count crossings.
 
 Footage never goes in Git. `.gitignore` excludes common video formats, but
@@ -60,9 +60,9 @@ The code never downloads BDD100K. Its licence restricts it to
 non-commercial use and requires registering and agreeing to the terms, and
 an automated download would sidestep that. Do it once, by hand:
 
-1. Register at <https://bdd-data.berkeley.edu/> and read the licence. A
-   portfolio project is not commercial, but anything sold or offered as a
-   service that is built on the fine-tuned weights may be. Keep the
+1. Register at <https://bdd-data.berkeley.edu/> and read the licence. This
+   project is non-commercial, but anything sold or offered as a service that
+   is built on the fine-tuned weights may not be. Keep the
    fine-tuned model to non-commercial use, or retrain on data you have
    commercial rights to.
 2. Download the **100K images** and the **detection labels (det_20)**:
@@ -134,7 +134,7 @@ ffmpeg -i blurred-clip.mp4 -vf fps=1/10 -q:v 2 frames/clip01-%04d.jpg
 
 Use [CVAT](https://www.cvat.ai/) or [Label Studio](https://labelstud.io/).
 Both are open source and can run locally (CVAT with Docker Compose; Label
-Studio with `pip install label-studio`). Either can run on the homelab later.
+Studio with `pip install label-studio`). Either can also run on the cluster.
 
 1. Create a project with exactly the project's class names, spelled as in
    the config: `car`, `pedestrian`, `truck`, `bus`, `bicycle`, `motorcycle`,

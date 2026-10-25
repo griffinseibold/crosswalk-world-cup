@@ -26,7 +26,7 @@ Examples:
     scripts/submit-training.py train --config configs/train-bdd100k.yaml --dry-run   # print the manifest
     scripts/submit-training.py promote --config configs/train-bdd100k.yaml --image-tag rocm-abc1234
 
-Kueue: with the chart's kueue.enabled (the homelab default) every Job is
+Kueue: with the chart's kueue.enabled (the default) every Job is
 created suspended with kueue.x-k8s.io/queue-name: crosswalk and waits for
 the gpu ClusterQueue to admit it. --no-kueue submits a plain Job (for a
 cluster without Kueue). `kubectl get workloads -n crosswalk` shows the queue.
@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import os
 import re
 import shlex
 import subprocess
@@ -212,8 +213,8 @@ def submit(args) -> int:
     print("  " + shlex.join(kubectl(args, "get", "pods", "-l", f"job-name={name}", "-w")))
     if not args.cpu:
         print(
-            "If the pod stays Pending, the GPU is busy (the homelab LLM may hold it:"
-            " ./scripts/lab-mode.py status) or the AMD device plugin is not installed."
+            "If the pod stays Pending, another workload holds the GPU or the cluster has"
+            " no GPU device plugin (kubectl describe pod shows which)."
         )
     return 0
 
@@ -268,7 +269,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--helm-set", action="append", default=[], help="extra raw Helm --set")
     parser.add_argument("--namespace", default="crosswalk")
     parser.add_argument(
-        "--context", default="kind-homelab-dev", help="kubectl context ('' for current)"
+        "--context",
+        default=os.environ.get("CROSSWALK_KUBE_CONTEXT", "kind-homelab-dev"),
+        help="kubectl context ('' for current; default $CROSSWALK_KUBE_CONTEXT or kind-homelab-dev)",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="print the rendered manifest instead of creating it"
