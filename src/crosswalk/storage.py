@@ -257,3 +257,30 @@ def expand_s3_videos(uri: str, cache_dir: str, suffixes: set[str], client=None) 
             store.get_file(key, str(local))
         paths.append(str(local))
     return paths
+
+
+def sync_prefix(uri: str, local_dir: str, client=None) -> dict[str, int]:
+    """Download everything under an s3:// prefix into ``local_dir``.
+
+    Files already present with the same size are skipped, so a training Job
+    whose scratch volume survived (persistent scratch, or a pod restart on the
+    same node) does not download the dataset again. Returns counts for logs.
+    """
+    bucket, prefix = parse_s3_uri(uri)
+    prefix = prefix.rstrip("/") + "/" if prefix else ""
+    store = S3Store(bucket, client=client)
+    paginator = store.client.get_paginator("list_objects_v2")
+    counts = {"downloaded": 0, "skipped": 0, "bytes": 0}
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for item in page.get("Contents", []):
+            key = item["Key"]
+            if key.endswith("/"):
+                continue  # "directory" placeholder objects
+            local = Path(local_dir) / key[len(prefix) :]
+            if local.exists() and local.stat().st_size == item["Size"]:
+                counts["skipped"] += 1
+                continue
+            store.get_file(key, str(local))
+            counts["downloaded"] += 1
+            counts["bytes"] += int(item["Size"])
+    return counts
