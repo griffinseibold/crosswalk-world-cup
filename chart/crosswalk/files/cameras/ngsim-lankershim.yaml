@@ -1,0 +1,28 @@
+# Candidate footage: NGSIM Lankershim Boulevard, Los Angeles (US DOT FHWA,
+# 16 June 2005, cameras on a 36-storey rooftop). See docs/data-sources.md:
+# the video datasets' licence is UNVERIFIED; confirm it on
+# data.transportation.gov before downloading, and do not deploy this camera
+# until `license` below is filled in from the source.
+#
+# Name the clip ngsim-lankershim.mp4 (or ngsim-lankershim__<anything>.mp4)
+# so its camera id matches this file. No video is committed to Git.
+camera_id: ngsim-lankershim
+crossing: Lankershim Blvd (NGSIM study area)
+location: Universal City, Los Angeles, CA (recorded June 2005)
+# Uncalibrated until someone picks four reference points: until then the
+# indicators are pixel-space and TTC/PET are not computed. To calibrate,
+# open a frame at frame_size, pick the four corners of one crosswalk, and
+# measure its width and length on a public map (docs/indicators.md):
+#
+# frame_size: [<width>, <height>]
+# roi: [[x, y], [x, y], [x, y], [x, y]]
+# calibration:
+#   image_points: [[x, y], [x, y], [x, y], [x, y]]
+#   world_points: [[0, 0], [<length m>, 0], [<length m>, <width m>], [0, <width m>]]
+#   reference: "<which crosswalk, and where the metres came from>"
+thresholds:
+  close_approach_heights: 1.0
+  crossing_window_s: 3.0
+source: "NGSIM Lankershim Boulevard Videos, US DOT FHWA (data.transportation.gov)"
+license: ""      # fill in from the dataset page before deploying
+attribution: "Next Generation Simulation (NGSIM), Federal Highway Administration"

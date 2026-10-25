@@ -336,3 +336,14 @@ def test_calibration_needs_a_frame_size_and_valid_points():
             world_points=PLAN_VIEW.world_points,
             reference="bad",
         )
+
+
+def test_chart_ships_the_same_camera_configs_as_the_repository():
+    # chart/crosswalk/files/cameras/ is a copy (Helm cannot read files
+    # outside the chart); keep them identical.
+    repo = {p.name: p.read_text() for p in (repo_root() / "configs" / "cameras").glob("*.yaml")}
+    chart = {
+        p.name: p.read_text()
+        for p in (repo_root() / "chart" / "crosswalk" / "files" / "cameras").glob("*.yaml")
+    }
+    assert repo == chart

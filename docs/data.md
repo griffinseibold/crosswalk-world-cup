@@ -43,6 +43,10 @@ the rule is not to put it in the repository folder at all.
 
 ## Datasets
 
+Openly licensed candidates for footage and training data (fixed-camera
+intersections, BDD100K alternatives), with what was verified about each
+licence: [data sources](data-sources.md).
+
 | Dataset | Use | Licence | How it gets here |
 | --- | --- | --- | --- |
 | COCO 2017 (via TorchVision weights) | The pretrained detector and baseline | Weights: BSD-3 (TorchVision); COCO annotations: CC BY 4.0 | TorchVision downloads the weights on first use |
