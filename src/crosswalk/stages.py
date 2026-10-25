@@ -12,11 +12,23 @@ from typing import Any
 
 from pydantic import Field
 
-from crosswalk.config import StrictModel, TrackingStageConfig, load_config
+from crosswalk.config import StreamConfig, StrictModel, TrackingStageConfig, load_config
+
+
+class IndicatorsStageConfig(StrictModel):
+    kafka: StreamConfig = Field(default_factory=lambda: StreamConfig(group="crosswalk-indicators"))
+    # Directory of per-camera YAML files (configs/cameras/ in the repository,
+    # a ConfigMap in the cluster). Cameras without a file get pixel-space
+    # indicators over the whole frame.
+    cameras_dir: str | None = "configs/cameras"
+    # Video seconds per indicator window. Ranking needs several windows per
+    # crossing, so shorter windows give more, noisier observations.
+    window_s: float = Field(60.0, gt=0)
 
 
 class StagesConfig(StrictModel):
     tracking: TrackingStageConfig = Field(default_factory=TrackingStageConfig)
+    indicators: IndicatorsStageConfig = Field(default_factory=IndicatorsStageConfig)
 
 
 def run_stage(name: str, path: str, overrides: list[str], port: int = 8080) -> dict[str, Any]:
@@ -27,4 +39,8 @@ def run_stage(name: str, path: str, overrides: list[str], port: int = 8080) -> d
         from crosswalk.tracking.stage import build_runner
 
         return serve("tracking", lambda bus, m: build_runner(config.tracking, bus, m), port)
+    if name == "indicators":
+        from crosswalk.indicators.stage import build_runner
+
+        return serve("indicators", lambda bus, m: build_runner(config.indicators, bus, m), port)
     raise SystemExit(f"unknown stage {name!r}")

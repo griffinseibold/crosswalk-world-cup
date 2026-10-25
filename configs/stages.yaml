@@ -10,3 +10,9 @@ tracking:
   min_hits: 2
   max_age_s: 1.0
   reorder_window: 8
+indicators:
+  kafka:
+    group: crosswalk-indicators
+    partitions: 3
+  cameras_dir: configs/cameras
+  window_s: 60
