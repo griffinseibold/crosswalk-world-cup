@@ -1,0 +1,48 @@
+[package]
+name = "crosswalk-ingest"
+version = "0.1.0"
+edition = "2024"
+# The oldest compiler every pinned dependency supports (jpeg-encoder 0.7
+# needs 1.87); CI and the image build with the toolchain in
+# rust-toolchain.toml.
+rust-version = "1.87"
+description = "Frame sampler for Crosswalk World Cup: FFmpeg decodes, Rust samples, buffers, uploads frames to S3 and publishes frame events to Kafka"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "crosswalk-ingest"
+path = "src/main.rs"
+
+# Exact versions, like requirements/*.txt on the Python side; Cargo.lock pins
+# everything underneath and CI builds with --locked. Every crate here is pure
+# Rust: the build needs no C libraries, no cmake and no system packages.
+[dependencies]
+anyhow = "=1.0.104"
+# rskafka's Record carries a chrono timestamp.
+chrono = { version = "=0.4.45", default-features = false, features = ["now"] }
+# No colour or "did you mean" suggestions: fewer dependencies for a service
+# that is configured by environment variables in a pod.
+clap = { version = "=4.6.7", default-features = false, features = ["derive", "env", "error-context", "help", "std", "usage"] }
+jpeg-encoder = { version = "=0.7.1", default-features = false, features = ["std"] }
+prometheus-client = "=0.25.1"
+# Pure-Rust Kafka client. Compression features are off: they pull in C
+# libraries (lz4, zstd) and frame events are small JSON records.
+rskafka = { version = "=0.6.0", default-features = false }
+# S3 requests are signed in src/s3.rs (AWS Signature Version 4) with these
+# two RustCrypto crates, the same versions rskafka's SASL support already
+# pulls in. See README.md for why this is not an S3 SDK.
+hmac = "=0.12.1"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+sha2 = "=0.10.9"
+tokio = { version = "=1.54.1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["fmt", "std"] }
+# Blocking HTTP client without TLS: the homelab's S3 endpoint is a plain-HTTP
+# in-cluster Service. See README.md before pointing it at an https endpoint.
+ureq = { version = "=3.5.0", default-features = false }
+
+[profile.release]
+lto = "thin"
+codegen-units = 4

@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "type": "frame",
+  "frame_id": "intersection-01/intersection-01__morning/20261025T101500Z-0/412",
+  "stream_id": "intersection-01/intersection-01__morning/20261025T101500Z-0",
+  "camera_id": "intersection-01",
+  "clip": "intersection-01__morning.mp4",
+  "frame_index": 412,
+  "sample_index": 82,
+  "pts_s": 13.7333,
+  "width": 1280,
+  "height": 720,
+  "decoded_at": 1793000000.123,
+  "published_at": 1793000000.161,
+  "image": {"bucket": "datasets", "key": "frames/intersection-01/intersection-01__morning/00000412.jpg"},
+  "content_type": "image/jpeg",
+  "bytes": 98213,
+  "sha256": "9f2b5c1e0d7a4b3c8e6f1a2d3c4b5a69788796a5b4c3d2e1f0a9b8c7d6e5f4a3"
+}

@@ -1,0 +1,7 @@
+# The compiler CI and the image build with. rustup installs it automatically
+# when cargo runs in this directory. 1.98.1 (released 2026-09-01); the crate
+# itself supports 1.87 and newer (rust-version in Cargo.toml).
+[toolchain]
+channel = "1.98.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

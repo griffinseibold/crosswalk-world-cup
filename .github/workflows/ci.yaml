@@ -63,6 +63,25 @@ jobs:
           --set job.enabled=true --set-string job.kind=train --set-string job.name=ci
           --set-file job.config=configs/train-synthetic.yaml --set job.synthetic=true >/dev/null
 
+  # The Rust frame sampler. rustup reads ingest/rust-toolchain.toml and
+  # installs the pinned compiler on first use; --locked fails the build if
+  # Cargo.lock is out of date instead of silently re-resolving.
+  ingest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ingest
+    steps:
+      - uses: actions/checkout@v4
+      # FFmpeg for the tests that decode a generated clip end to end.
+      - run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends ffmpeg
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ingest
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
   # Version tags (v1.2.3) publish the CPU image as :1.2.3 and :latest; pushes
   # to main publish :main and :sha-<commit>.
   publish-cpu-image:
@@ -71,6 +90,7 @@ jobs:
       - lint
       - test
       - lint-chart
+      - ingest
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -108,3 +128,39 @@ jobs:
             IMAGE=ghcr.io/griffinseibold/crosswalk-world-cup:${{ steps.meta.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # The sampler image, on version tags only (the chart pins image.ingest.tag
+  # to a release): ghcr.io/griffinseibold/crosswalk-ingest:1.2.3 and :latest.
+  publish-ingest-image:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - ingest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/griffinseibold/crosswalk-ingest
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: ingest
+          file: ingest/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=ingest
+          cache-to: type=gha,mode=max,scope=ingest
