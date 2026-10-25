@@ -225,6 +225,7 @@ pipeline:
     # Recorded, blurred clips (docs/data.md) synced from S3 into an emptyDir
     # by an init container, then played in a loop at their own frame rate.
     footage: s3://datasets/footage/
+    # fps:N, every:N, all, or motion:IDLE-BUSY (ingest/README.md, Behaviour).
     sampling: "fps:5"
     overflow: block          # block (lose nothing) | drop (bounded latency)
     buffer: 32

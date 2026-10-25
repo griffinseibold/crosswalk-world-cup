@@ -32,6 +32,14 @@ Recorded footage only. Inputs are files or directories, never camera URLs
 - **Sampling** (`--sampling`): `fps:5` (default) keeps one frame per 0.2 s of
   *video time*, which also works for variable-frame-rate clips. `every:N`
   keeps every N-th decoded frame, and `all` keeps everything.
+  `motion:IDLE-BUSY[@CELLS]` adapts to the scene: each frame is reduced to a
+  32x18 grid of average brightness and compared with the last kept frame; if
+  at least `CELLS` cells (default 1) changed by more than 10 grey levels, the
+  frame is kept at `BUSY` fps, otherwise only at `IDLE` fps. `motion:2-10`
+  watches an empty crossing at 2 fps and a busy one at 10. Keep `IDLE` at
+  2 fps or more with the default tracker (`max_age_s: 1.0`): at 1 fps a
+  pedestrian standing still at the kerb is seen once a second, right at the
+  tracker's limit, and their track can break into pieces.
 - **Backpressure** (`--overflow`, `--buffer`): when publishing falls behind,
   `block` (default) makes the decoder wait, so nothing is lost and the clip
   plays slower than real time. `drop` discards the frame that does not fit

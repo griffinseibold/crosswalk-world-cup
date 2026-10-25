@@ -114,7 +114,9 @@ Treat the values here as indicative.
   right off the road plane.
 - **Sampling.** At the sampler's default 5 fps, fast vehicles move about
   2.8 m between frames at 50 km/h. Minimum separation and TTC can miss the
-  true minimum between frames.
+  true minimum between frames. The sampler's `motion` policy samples faster
+  while the scene changes and slower while it is still; a camera's windows
+  are only comparable with another's if both used the same policy.
 - **Recorded footage, not the present.** A clip shows one period on one day.
   The leaderboard's "right now" is the time the indicators were computed, not
   the time the footage was recorded.

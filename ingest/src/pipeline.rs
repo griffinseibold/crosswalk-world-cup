@@ -228,7 +228,7 @@ pub async fn run_pass<S: FrameStore, K: EventSink>(
         report.decoded += 1;
         report.last_pts_s = frame.pts_s;
         metrics.decoded.get_or_create(&labels).inc();
-        if !sampler.keep(frame.pts_s) {
+        if !sampler.keep_frame(frame.pts_s, &frame.rgb, frame.width, frame.height) {
             continue;
         }
         let sample_index = report.sampled;
