@@ -1,125 +1,78 @@
-# Handoff — 2026-10-24
+# Handoff — updated 2026-10-25
 
-State of the Crosswalk World Cup project and the homelab work around it, written
-at the end of a working session so the next one can pick up without rereading
-the conversation. Delete this file once its next steps are done.
+Where the Crosswalk World Cup project and its homelab platform stand, so the
+next session can pick up without rereading the conversation. Delete this file
+once its open steps are done.
 
-## 1. Done and live on GitHub
+## 1. Live on GitHub
 
 | Repo | Branch | What |
 | --- | --- | --- |
-| Homelab | `main` (54ad68d) | LLM on demand: a demand controller scales llama-server when a running workload carries `homelab.local/llm: requested`, stops it 5 min after the last request. `scripts/lab-mode.py llm\|apps\|status` switches the lab between apps mode and LLM-only mode (chat UI runs only in llm mode). Alert, bootstrap and Flux drift fixes. 90 tests pass. **Not yet verified on the real cluster.** |
-| Flip-Finder | `master` (8d3edcd) | Chart requests the LLM (`llm.enabled`, default true); backend waits for a starting model and tells the user; frontend shows the waiting note. CI passed. |
-| hello-crud | `main` (c2e959a) | Optional LLM example, off by default: `GET /llm`, `POST /items/<id>/describe`, 503 + `Retry-After` while the model starts. 12 tests pass. |
-| crosswalk-world-cup | `main` (a086a85) | WIP Python package core (see section 3). Not runnable yet. |
+| Homelab | `main` (58d7095) | LLM on demand (controller + `scripts/lab-mode.py`) and ML platform: Garage S3 (`dxflrs/garage:v2.4.1`, Service `s3:9000`, buckets `datasets`, `checkpoints`, `mlflow-artifacts`), MLflow `v3.17.2-full` at `mlflow.localhost:8080`, `scripts/ml-credentials.py <namespace>`. 116 tests pass. **Not yet run on the real cluster.** |
+| Homelab | `k3s` (cb83d2d) | Kind → single-node k3s v1.36.5+k3s1, AMD device plugin `rocm/k8s-device-plugin:1.31.0.11`, llama-server via `amd.com/gpu` (no privileged), node-exporter drm/hwmon GPU dashboard, hostPort exposure on 127.0.0.1:8080 and LAN_ADDRESS:443, nftables guard, rewritten bootstrap and backups. 145 tests pass. **Not for `main` until the cutover in `docs/migrate-to-k3s.md`.** |
+| Flip-Finder | `master` | Requests the LLM; waits for a starting model. CI green. |
+| hello-crud | `main` | Optional LLM example, off by default. CI green. |
+| crosswalk-world-cup | `main` | Milestones 1–2 code: FCOS inference service with dynamic batching, Experiment A harness, custom training loop with checkpoint/resume and Experiment B fault injection, MLflow, `crosswalk validate` (Milestone 0 GPU check), Helm chart, Argo app, CPU/ROCm Dockerfiles, docs. CI green, CPU image published as `:main`. |
 
 ## 2. Waiting on Griffin
 
-1. **Publish two releases** (this session can push branches but not tags):
-   in Flip-Finder and in hello-crud, GitHub → Releases → Draft a new release →
-   tag `v0.4.0`, target branch **`release-0.4.0`** → Publish. CI then builds
-   the 0.4.0 images.
-2. After the images exist, push each repo's `release-0.4.0` commit to its
-   default branch (Flip-Finder 9727a30 → `master`, hello-crud f73c0b4 →
-   `main`) so Argo CD rolls onto 0.4.0. Never before: the chart would point at
-   an image that doesn't exist.
-3. **Check the homelab rollout:** `flux get kustomizations`, then
-   `./scripts/lab-mode.py status` — Flip Finder should appear as requesting
-   the LLM; chat should be stopped in apps mode.
-4. Optional cleanup (this session cannot delete branches): `llm-on-demand` in
-   Flip-Finder and hello-crud, and `release-0.4.0` in both after step 2.
+1. **Publish releases** (this session can't push tags): GitHub → Releases →
+   Draft a new release.
+   - Flip-Finder: tag `v0.4.0`, target branch `release-0.4.0`.
+   - hello-crud: tag `v0.4.0`, target branch `release-0.4.0`.
+   - crosswalk-world-cup: tag `v0.1.0`, target `main` (the chart's CPU image
+     tag is `0.1.0`).
+   After the Flip-Finder and hello-crud images build, push each
+   `release-0.4.0` commit to its default branch (Flip-Finder 9727a30 →
+   `master`, hello-crud f73c0b4 → `main`), never before.
+2. **On the homelab machine:** `git pull`, then rerun
+   `./scripts/bootstrap-dev.sh`. It generates the Garage secrets (kept in
+   `~/.config/homelab/ml-storage/`), gives MLflow its S3 key and waits for
+   both. Until then the `ml-storage` and `mlflow` Kustomizations stay not
+   ready; nothing else depends on them.
+3. Check: `./scripts/lab-mode.py status` (Flip Finder should request the
+   LLM), `http://mlflow.localhost:8080`.
+4. Crosswalk on Kind (CPU only, before any GPU work):
+   `./scripts/ml-credentials.py crosswalk`, apply
+   `deploy/argocd-application.yaml`, run the synthetic smoke training Job
+   with `scripts/submit-training.py ... --cpu`.
+5. **k3s cutover (planned for winter break):** follow
+   `docs/migrate-to-k3s.md` on the `k3s` branch. Then
+   `scripts/build-rocm-image.sh RUNTIME=k3s`, `submit-training.py validate`,
+   and turn on `gpu.enabled`.
+6. Optional cleanup (this session can't delete branches): `llm-on-demand` in
+   Flip-Finder and hello-crud; `release-0.4.0` in both after step 1.
 
-## 3. Crosswalk repo: what exists and what's next
+## 3. Only verifiable on the real machine
 
-Built under `src/crosswalk/`, smoke-tested only where torch isn't needed
-(the sandbox blocked PyPI and download.pytorch.org):
+- Garage admin API responses (scripts stop with the response text if they
+  differ) and that `--single-node` sets up the layout itself; MLflow's first
+  start and artifact proxying.
+- k3s: hostPorts binding only to 127.0.0.1 and LAN_ADDRESS, the guard blocking
+  6443/10250 from another device, Envoy listener ports 10080/10443 (inferred
+  from `wellKnownPortShift = 10000`), cgroup freezer paths for backups, the
+  claim names during restore.
+- GPU: the device plugin advertising the RX 6900 XT, Vulkan llama-server as
+  non-root through the plugin, drm/hwmon metric names, and ROCm 7.2.4 on
+  gfx1030 (the RX 6900 XT isn't on AMD's official list; fallback
+  `HSA_OVERRIDE_GFX_VERSION`). Crosswalk chart assumes video gid 44 and
+  render gid 992 — check `getent group video render` and set `gpu.renderGid`.
 
-- Shared: `config.py` (strict YAML configs, overrides, hash), `device.py`
-  (vendor-agnostic device choice via `torch.cuda`), `hardware.py`,
-  `stats.py`, `storage.py` (S3 + local, atomic writes), `synthetic.py`.
-- Milestone 1: `models.py` (FCOS-ResNet50-FPN, chosen over Faster R-CNN:
-  single-stage, anchor-free, cheaper, fewer exotic ROCm kernels; the relative
-  compute claim still needs checking against the torchvision docs),
-  `inference/` (sequential/fixed/dynamic batcher, PyAV decode, Prometheus
-  metrics, JSON-lines output, status server), `benchmark/harness.py`
-  (Experiment A).
-- Milestone 2 pieces: BDD100K + COCO parsing, dataset hashing, checkpoints
-  (local → S3 → `latest.json` pointer, SHA-256 verified resume), resumable
-  sampler, warmup-cosine schedule, MLflow tracking that reattaches on resume,
-  pycocotools mAP. Fix: `ruff` flags two intentional open handles in
-  `inference/pipeline.py` → add `# noqa: SIM115`.
+## 4. Defaults chosen (say if you disagree)
 
-Next, in order:
+1. Chat UI runs only in llm mode; LLM idle grace 5 min.
+2. llm mode stops every workload in an Argo app's namespace.
+3. Garage instead of MinIO (MinIO archived April 2026); node-exporter
+   drm/hwmon instead of AMD's exporter (doesn't support RDNA2 consumer cards).
+4. S3 keys per namespace (`k8s-<ns>`), not one shared key.
+5. On k3s, llama-server runs as the model directory's owner, so a root-owned
+   model directory is refused; Docker stays installed after migration.
+6. Detector FCOS; ROCm image 7.2.4 / PyTorch 2.9.1 (AMD-validated, not the
+   newest); Crosswalk service cache on a persistent 20 Gi claim.
 
-1. `training/loop.py` — the custom training loop (seed, FCOS for training,
-   optimizer + `LambdaLR(WarmupCosine)`, resume via
-   `make_manager(...).find_latest()` + `state.restore`, checkpoint every N
-   steps with the MLflow run id, Experiment B recovery metrics, evaluate
-   model vs. baseline, register model).
-2. `cli.py` (`serve`, `infer`, `benchmark`, `train`, `validate`,
-   `make-synthetic`) and `validate.py` (Milestone 0 GPU check).
-3. pytest suite incl. a subprocess resume-after-kill test.
-4. `requirements/` (CPU and ROCm lists) and `configs/*.yaml`.
-5. Containers: `docker/Dockerfile.cpu`, `docker/Dockerfile.rocm`
-   (`FROM rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.9.1`),
-   `scripts/build-rocm-image.sh`, `scripts/submit-training.py`.
-6. Helm chart `chart/crosswalk` + `deploy/argocd-application.yaml`
-   (namespace `crosswalk`, `amd.com/gpu: 1`, no LLM label).
-7. CI (ruff, pytest on CPU, helm lint, CPU image to GHCR on tags) and docs
-   (README, running-on-the-homelab, benchmarks with empty tables, data).
+## 5. Next build work (Milestone 3, after the above)
 
-Version pins found (not yet written into files): ROCm 7.2.4 image above
-(ships torchvision 0.24.0); CPU `torch==2.9.1`, `torchvision==0.24.1`;
-av 19.0.2, prometheus-client 0.26.0, mlflow-skinny 3.17.2, boto3 1.43.118,
-moto 5.2.4, pycocotools 2.0.11, pydantic 2.14.1, numpy 2.5.4 (Python ≥ 3.12).
-
-## 4. Homelab Milestone 0: researched, not built
-
-No code was written; branch `ml-platform` exists only locally and equals
-`main`. Findings to build from:
-
-- **Object storage: Garage, not MinIO.** MinIO's repo was archived on
-  2026-04-25 ("no longer maintained"). Garage `dxflrs/garage:v2.4.1`
-  (v2.5.0 came out today), `garage server --single-node`,
-  `replication_factor = 1`, `db_engine = "sqlite"`, S3 on 3900 (expose as
-  Service `s3` port 9000), admin API on 3903. A small Job (stdlib Python, like
-  the demand controller) creates the buckets `datasets`, `checkpoints`,
-  `mlflow-artifacts` through admin API v2 (`CreateBucket`, `ImportKey`,
-  `AllowBucketKey`). Unconfirmed: the key-ID format and the
-  `UpdateClusterLayout` body.
-- **MLflow:** `ghcr.io/mlflow/mlflow:v3.17.2-full` (includes boto3; set a
-  non-root uid). `--serve-artifacts --artifacts-destination
-  s3://mlflow-artifacts`, SQLite on a small PVC, `MLFLOW_S3_ENDPOINT_URL`,
-  `MLFLOW_BOTO_CLIENT_ADDRESSING_STYLE=path`, `MLFLOW_DISABLE_TELEMETRY=true`,
-  and `--allowed-hosts` must list `mlflow.localhost:8080` and
-  `mlflow.mlflow.svc.cluster.local:5000` (Host checks since 3.5.0).
-- **Credentials:** bootstrap generates Garage secrets once into
-  `~/.config/homelab/ml-storage/` (like the lab CA); `scripts/ml-credentials.py
-  <namespace>` creates Secret `s3-credentials` for an app. Add `ml-storage`
-  and `mlflow` to `lab-mode.py`'s platform namespaces. Backups already cover
-  new local-path PVCs.
-- **k3s (separate branch, not for `main` until cutover):** k3s v1.36.5+k3s1.
-  AMD device plugin `rocm/k8s-device-plugin:1.31.0.11` mounts `/dev/kfd` and
-  the render node, so llama-server can drop privileged mode and request
-  `amd.com/gpu`. Exposure: hostPort on `127.0.0.1:8080` and
-  `LAN_ADDRESS:443` via an Envoy deployment patch — first confirm Envoy
-  Gateway v1.9.1's container ports for listeners 80/443. Kind alternative if
-  k3s waits: recreate Kind with `/dev/kfd` mounted.
-- **GPU metrics:** AMD's device-metrics-exporter doesn't support the RX 6900
-  XT. Use node-exporter's `--collector.drm` (busy %, VRAM) plus hwmon
-  (temperature, power) in kube-prometheus-stack, keeping the chart's existing
-  extraArgs.
-
-## 5. Decisions for Griffin (defaults chosen; say if you disagree)
-
-1. Chat UI runs only in llm mode.
-2. LLM idle grace 5 min; new chat install not stopped for 3 min.
-3. llm mode stops every Deployment/StatefulSet in an Argo app's namespace.
-4. Garage v2.4.1 instead of MinIO.
-5. GPU metrics from node-exporter instead of AMD's exporter.
-6. Detector: FCOS. ROCm image: 7.2.4 / PyTorch 2.9.1 (AMD-validated), not the
-   newest.
-7. Risk to know: the RX 6900 XT (gfx1030) is not on ROCm 7.2.4's official
-   GPU list (only the W6800/V620 with the same chip). The Milestone 0
-   validation job exists to prove it works; fallback is
-   `HSA_OVERRIDE_GFX_VERSION`.
+Rust frame sampler (FFmpeg decodes), Kafka between stages, tracking and
+rule-based conflict indicators, two recorded fixed-camera videos, ranking API,
+static leaderboard page. Hand-label ~200 fixed-camera frames (COCO) for the
+promotion gate.
