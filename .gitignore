@@ -6,3 +6,11 @@ __pycache__/
 results/
 mlruns/
 *.egg-info/
+
+# Footage and datasets never go in Git (docs/data.md).
+*.mp4
+*.mkv
+*.mov
+*.avi
+*.webm
+/data/
