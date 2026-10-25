@@ -57,10 +57,16 @@ def to_coco_gt(samples: list[Sample], classes: list[str]) -> dict[str, Any]:
     return {"images": images, "annotations": annotations, "categories": categories}
 
 
-def to_coco_dt(predictions: list[Prediction]) -> list[dict[str, Any]]:
+def to_coco_dt(
+    predictions: list[Prediction], num_classes: int | None = None
+) -> list[dict[str, Any]]:
     out = []
     for image_id, p in enumerate(predictions, start=1):
         for (x1, y1, x2, y2), score, label in zip(p.boxes, p.scores, p.labels, strict=True):
+            # Label 0 is background (FCOS can emit it); ids past the class
+            # list cannot match any ground truth.
+            if label < 1 or (num_classes is not None and label > num_classes):
+                continue
             out.append(
                 {
                     "image_id": image_id,
@@ -91,7 +97,7 @@ def coco_map(
     gt.dataset = to_coco_gt(samples, classes)
     with contextlib.redirect_stdout(io.StringIO()):
         gt.createIndex()
-    detections = to_coco_dt(predictions)
+    detections = to_coco_dt(predictions, len(classes))
     results: dict[str, float] = {}
     if not detections:
         return dict.fromkeys(STAT_NAMES, 0.0) | {f"ap/{c}": 0.0 for c in classes}

@@ -98,7 +98,9 @@ class TorchPredictor:
             labels = out["labels"].cpu().tolist()
             frame: list[Detection] = []
             for box, score, label in zip(boxes, scores, labels, strict=True):
-                if score < threshold:
+                # TorchVision's FCOS counts background among its classes and
+                # can emit label 0; it is never a detection.
+                if score < threshold or label == 0:
                     continue
                 name = self.names[label] if label < len(self.names) else str(label)
                 frame.append(Detection(name, int(label), float(score), tuple(box)))

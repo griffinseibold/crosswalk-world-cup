@@ -49,6 +49,9 @@ def test_coco_conversion():
     assert gt["annotations"][0]["bbox"] == [10, 10, 40, 40] and gt["annotations"][0]["area"] == 1600
     dt = to_coco_dt([Prediction([(1, 2, 4, 6)], [0.5], [2])])
     assert dt == [{"image_id": 1, "category_id": 2, "bbox": [1, 2, 3, 4], "score": 0.5}]
+    # Background (0) and out-of-range labels are dropped.
+    mixed = Prediction([(0, 0, 1, 1)] * 3, [0.9, 0.8, 0.7], [0, 1, 3])
+    assert [d["category_id"] for d in to_coco_dt([mixed], num_classes=2)] == [1]
 
 
 def test_perfect_predictions_score_one():
