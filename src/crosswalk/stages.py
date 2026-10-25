@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import Field
 
 from crosswalk.config import StreamConfig, StrictModel, TrackingStageConfig, load_config
+from crosswalk.ranking.service import RankingStageConfig
 
 
 class IndicatorsStageConfig(StrictModel):
@@ -29,6 +30,7 @@ class IndicatorsStageConfig(StrictModel):
 class StagesConfig(StrictModel):
     tracking: TrackingStageConfig = Field(default_factory=TrackingStageConfig)
     indicators: IndicatorsStageConfig = Field(default_factory=IndicatorsStageConfig)
+    ranking: RankingStageConfig = Field(default_factory=RankingStageConfig)
 
 
 def run_stage(name: str, path: str, overrides: list[str], port: int = 8080) -> dict[str, Any]:
@@ -43,4 +45,8 @@ def run_stage(name: str, path: str, overrides: list[str], port: int = 8080) -> d
         from crosswalk.indicators.stage import build_runner
 
         return serve("indicators", lambda bus, m: build_runner(config.indicators, bus, m), port)
+    if name == "ranking":
+        from crosswalk.ranking.service import serve_ranking
+
+        return serve_ranking(config.ranking, port)
     raise SystemExit(f"unknown stage {name!r}")

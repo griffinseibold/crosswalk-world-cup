@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Crosswalk World Cup</title>
+<meta name="description" content="An experimental comparison of observable pedestrian-vehicle indicators at crossings in recorded footage. Not safety advice.">
+<style>
+  /* Self-contained on purpose: the page is served by the ranking service on
+     a homelab that may have no internet access, so no fonts, scripts or
+     images are fetched from anywhere else. */
+  :root {
+    --paper: #f4f5f2;
+    --ink: #1c2836;
+    --muted: #5b6675;
+    --rule: #cfd3d6;
+    --stripe: #ffcc00;
+    --stripe-ink: #1c2836;
+    --hand: #b33a0b;
+    --hand-bg: #fbeee6;
+    --bar: #1c2836;
+    --bar-soft: #9aa5b1;
+    --focus: #0b5fd6;
+    --sign: "Overpass", "Bahnschrift", "DIN Alternate", "DIN 2014", "Roboto Condensed", "Arial Narrow", system-ui, sans-serif;
+    --text: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #1f2327;
+      --ink: #e8eaec;
+      --muted: #a3acb6;
+      --rule: #3a4047;
+      --stripe: #e9e6dc;
+      --stripe-ink: #1f2327;
+      --hand: #ff9a6b;
+      --hand-bg: #2c2420;
+      --bar: #e8eaec;
+      --bar-soft: #6c7681;
+      --focus: #7fb0ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 1rem/1.55 var(--text);
+  }
+  a { color: inherit; text-underline-offset: 0.18em; }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .wrap { max-width: 64rem; margin: 0 auto; padding: 0 1rem; }
+  .prose { max-width: 70ch; }
+
+  /* The hero: the question painted across zebra bars. */
+  header { padding: 2.5rem 0 1.5rem; }
+  .question {
+    font-family: var(--sign);
+    font-weight: 700;
+    font-size: clamp(2rem, 6.4vw, 4.4rem);
+    line-height: 1.12;
+    letter-spacing: -0.01em;
+    margin: 0;
+    max-width: 18ch;
+  }
+  .question span {
+    background: var(--stripe);
+    color: var(--stripe-ink);
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    padding: 0.02em 0.22em;
+    line-height: 1.5;
+  }
+  .answer {
+    font-family: var(--sign);
+    font-size: clamp(1.15rem, 2.6vw, 1.5rem);
+    margin: 1.4rem 0 0.4rem;
+    max-width: 40ch;
+  }
+  .disclaimer { color: var(--muted); margin: 0; }
+  .meta { color: var(--muted); font-size: 0.9rem; margin-top: 1rem; }
+
+  h2 {
+    font-family: var(--sign);
+    font-size: 1.5rem;
+    line-height: 1.25;
+    margin: 2.75rem 0 0.35rem;
+  }
+  h2 + p { margin-top: 0; color: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; margin-top: 1rem; }
+  caption { text-align: left; }
+  th, td { text-align: left; padding: 0.7rem 0.6rem 0.7rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  thead th { font-weight: 600; font-size: 0.9rem; color: var(--muted); border-bottom: 2px solid var(--ink); }
+  td.num, th.num { text-align: right; }
+  .rank { font-family: var(--sign); font-size: 1.6rem; font-weight: 700; width: 3rem; line-height: 1; }
+  .crossing strong { display: block; font-weight: 600; }
+  .crossing small { display: block; color: var(--muted); }
+  .change { display: block; font-size: 0.85rem; color: var(--muted); }
+  .change.up { color: inherit; font-weight: 600; }
+
+  /* Rate with its 95% interval: whisker = interval, dot = point estimate. */
+  .rate { min-width: 12rem; }
+  .rate-figures { display: flex; gap: 0.5rem; align-items: baseline; justify-content: space-between; }
+  .rate-figures b { font-family: var(--sign); font-size: 1.15rem; }
+  .rate-figures span { color: var(--muted); font-size: 0.85rem; }
+  .ci { position: relative; height: 0.9rem; margin-top: 0.35rem; }
+  .ci .track { position: absolute; left: 0; right: 0; top: 50%; border-top: 1px dashed var(--rule); }
+  .ci .whisker { position: absolute; top: 50%; height: 0; border-top: 3px solid var(--bar-soft); transform: translateY(-1px); }
+  .ci .dot { position: absolute; top: 50%; width: 0.7rem; height: 0.7rem; border-radius: 50%; background: var(--bar); transform: translate(-50%, -50%); }
+
+  .empty { padding: 1.25rem 0; color: var(--muted); border-bottom: 1px solid var(--rule); }
+  .waiting li { margin: 0.4rem 0; }
+  .waiting small { color: var(--muted); }
+
+  .limits {
+    margin-top: 2.75rem;
+    padding: 1.25rem 1.25rem 0.5rem;
+    background: var(--hand-bg);
+    border-left: 6px solid var(--hand);
+  }
+  .limits h2 { margin-top: 0; color: var(--hand); }
+  .limits li { margin: 0.5rem 0; }
+  footer { margin: 3rem 0 2rem; color: var(--muted); font-size: 0.9rem; }
+  .status { color: var(--hand); }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* Phones: each row becomes a labelled block, nothing scrolls sideways. */
+  @media (max-width: 40rem) {
+    thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    table, tbody, tr, td { display: block; width: 100%; }
+    tr { border-bottom: 1px solid var(--rule); padding: 0.75rem 0; display: grid; grid-template-columns: 3rem 1fr; column-gap: 0.5rem; }
+    td { border: 0; padding: 0.2rem 0; text-align: left; }
+    td.num { text-align: left; }
+    td.rank { grid-row: span 6; }
+    td[data-label]::before { content: attr(data-label) ": "; color: var(--muted); font-size: 0.85rem; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 class="question"><span>Where is the safest place on Earth to cross the street right now?</span></h1>
+    <p class="answer" id="answer" aria-live="polite">Checking the footage…</p>
+    <p class="disclaimer prose">A deliberately absurd question, answered carefully: this page compares
+      observable pedestrian–vehicle indicators in <em>recorded</em> footage. It is an experiment,
+      not a measure of risk and not safety advice.</p>
+    <p class="meta" id="meta"></p>
+  </header>
+
+  <main>
+    <section aria-labelledby="metric-title">
+      <h2 id="metric-title">Calibrated crossings</h2>
+      <p class="prose">Distances in metres from a hand-set calibration. Ranked by the upper end of the
+        95% interval for close approaches per 100 pedestrian-minutes, lowest first, so a crossing
+        cannot win on a short, lucky observation.</p>
+      <div id="metric"></div>
+    </section>
+
+    <section aria-labelledby="pixel-title">
+      <h2 id="pixel-title">Uncalibrated crossings (apparent, in pixels)</h2>
+      <p class="prose">No calibration yet, so "close" is judged against the pedestrian's apparent size
+        in the image. These numbers are not comparable with the table above, or between cameras.</p>
+      <div id="pixel"></div>
+    </section>
+
+    <section aria-labelledby="waiting-title">
+      <h2 id="waiting-title">Not ranked yet</h2>
+      <p class="prose">Crossings with too little footage to say anything with confidence.</p>
+      <div id="waiting"></div>
+    </section>
+
+    <section class="limits prose" aria-labelledby="limits-title">
+      <h2 id="limits-title">What this cannot tell you</h2>
+      <ul>
+        <li><strong>It is not risk.</strong> A close approach is a pedestrian and a vehicle being near
+          each other on camera. Almost none lead to harm, and the page knows nothing about who had right of way.</li>
+        <li><strong>The footage is recorded.</strong> "Right now" means when the numbers were computed,
+          not when the video was filmed. One clip shows one period on one day.</li>
+        <li><strong>The detector makes mistakes.</strong> Missed people (small, hidden, at night), false
+          detections and broken tracks change every count. Riders on bikes may be counted twice.</li>
+        <li><strong>Pixels are not metres.</strong> Without calibration, distances depend on the camera's
+          height and angle. With it, four hand-picked points are exact only near themselves.</li>
+        <li><strong>Sampling misses moments.</strong> Frames are sampled a few times a second; the true
+          closest approach can fall between them.</li>
+        <li><strong>Small numbers are noisy.</strong> That is why every rate carries an interval and
+          crossings with little footage are not ranked.</li>
+      </ul>
+      <p>Definitions and thresholds: <a href="https://github.com/griffinseibold/crosswalk-world-cup/blob/main/docs/indicators.md">indicators</a>
+        and <a href="https://github.com/griffinseibold/crosswalk-world-cup/blob/main/docs/ranking.md">ranking rules</a>.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p>Crosswalk World Cup is a portfolio project about GPU machine-learning infrastructure. Footage
+      sources and licences are listed with each crossing. Raw data:
+      <a href="api/leaderboard">leaderboard JSON</a>, <a href="api/history">history</a>.</p>
+    <p class="status" id="status" role="status"></p>
+  </footer>
+</div>
+
+<script>
+"use strict";
+const REFRESH_MS = 60000;
+
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === "class") node.className = v; else node.setAttribute(k, v);
+  }
+  for (const c of children) {
+    if (c === undefined || c === null) continue;
+    node.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  return node;
+}
+
+function fmt(n, digits = 1) {
+  if (n === null || n === undefined || Number.isNaN(n)) return "–";
+  return Number(n).toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: digits });
+}
+
+function ago(seconds) {
+  if (seconds < 90) return "just now";
+  const m = seconds / 60;
+  if (m < 90) return `${Math.round(m)} minutes ago`;
+  const h = m / 60;
+  if (h < 36) return `${Math.round(h)} hours ago`;
+  return `${Math.round(h / 24)} days ago`;
+}
+
+function changeText(entry) {
+  if (entry.change === "new") return el("span", { class: "change" }, "New on the board");
+  if (!entry.change) return el("span", { class: "change" }, "Same place as a day ago");
+  const up = entry.change > 0;
+  const n = Math.abs(entry.change);
+  return el("span", { class: "change" + (up ? " up" : "") },
+    `${up ? "▲ Up" : "▼ Down"} ${n} since a day ago`);
+}
+
+function interval(rate, scaleMax) {
+  const box = el("div", { class: "ci", "aria-hidden": "true" }, el("div", { class: "track" }));
+  if (rate.rate === null || !scaleMax) return box;
+  const pct = (v) => `${Math.min(100, (v / scaleMax) * 100)}%`;
+  const w = el("div", { class: "whisker" });
+  w.style.left = pct(rate.lower);
+  w.style.width = `calc(${pct(rate.upper)} - ${pct(rate.lower)})`;
+  const d = el("div", { class: "dot" });
+  d.style.left = pct(rate.rate);
+  box.append(w, d);
+  return box;
+}
+
+function table(entries, space) {
+  if (!entries.length) {
+    return el("p", { class: "empty" }, space === "metric"
+      ? "No calibrated crossing has enough footage yet. Add a calibration to a camera's config to see it here."
+      : "No uncalibrated crossing has enough footage yet.");
+  }
+  const scaleMax = Math.max(...entries.map((e) => e.rates_per_100_ped_minutes.close_approaches.upper || 0)) * 1.05;
+  const unit = space === "metric" ? "m" : "px";
+  const tbody = el("tbody");
+  for (const e of entries) {
+    const r = e.rates_per_100_ped_minutes.close_approaches;
+    const o = e.observation;
+    tbody.append(el("tr", {},
+      el("td", { class: "rank" }, e.rank),
+      el("td", { class: "crossing" },
+        el("strong", {}, e.crossing),
+        el("small", {}, [e.location, `updated ${ago(e.freshness.age_s)}`].filter(Boolean).join(", ")),
+        changeText(e)),
+      el("td", { class: "rate", "data-label": "Close approaches per 100 pedestrian-minutes" },
+        el("div", { class: "rate-figures" },
+          el("b", {}, fmt(r.rate, 2)),
+          el("span", {}, `95%: ${fmt(r.lower, 2)} to ${fmt(r.upper, 2)}`)),
+        interval(r, scaleMax)),
+      el("td", { class: "num", "data-label": "Footage" }, `${fmt(o.observed_minutes, 0)} min`),
+      el("td", { class: "num", "data-label": "Pedestrians, vehicles" }, `${o.pedestrians.toLocaleString()} / ${o.vehicles.toLocaleString()}`),
+      el("td", { class: "num", "data-label": `Closest (${unit})` }, fmt(e.extremes.min_separation, space === "metric" ? 1 : 0)),
+    ));
+  }
+  const caption = space === "metric"
+    ? "Calibrated crossings, ranked by the upper bound of the close-approach rate"
+    : "Uncalibrated crossings, apparent pixel-space indicators";
+  return el("table", {},
+    el("caption", { class: "visually-hidden" }, caption),
+    el("thead", {}, el("tr", {},
+      el("th", { scope: "col" }, "Rank"),
+      el("th", { scope: "col" }, "Crossing"),
+      el("th", { scope: "col" }, "Close approaches per 100 pedestrian-minutes"),
+      el("th", { scope: "col", class: "num" }, "Footage"),
+      el("th", { scope: "col", class: "num" }, "Pedestrians / vehicles"),
+      el("th", { scope: "col", class: "num" }, `Closest (${unit})`))),
+    tbody);
+}
+
+function waiting(entries) {
+  if (!entries.length) return el("p", { class: "empty" }, "Every crossing with footage is ranked.");
+  const list = el("ul", { class: "waiting prose" });
+  for (const e of entries) {
+    list.append(el("li", {}, el("strong", {}, e.crossing), " ",
+      el("small", {}, `needs more: ${e.not_ranked_because.join("; ")}`)));
+  }
+  return list;
+}
+
+function answer(board) {
+  const top = board.tables.metric[0];
+  if (top) {
+    return `Among calibrated crossings, ${top.crossing} has the lowest upper bound on close approaches: ` +
+      `at most ${fmt(top.rates_per_100_ped_minutes.close_approaches.upper, 2)} per 100 pedestrian-minutes, ` +
+      `based on ${fmt(top.observation.observed_minutes, 0)} minutes of footage.`;
+  }
+  if (board.tables.pixel.length) {
+    return "No calibrated crossing has enough footage yet. The uncalibrated table below compares apparent, pixel-space indicators only.";
+  }
+  if (board.crossings) return "Not enough footage yet to rank any crossing. The ones being watched are listed below.";
+  return "No footage has been processed yet. Upload recorded, blurred clips to start the pipeline.";
+}
+
+async function load() {
+  const status = document.getElementById("status");
+  try {
+    const res = await fetch("api/leaderboard", { cache: "no-store" });
+    if (!res.ok) throw new Error(`the ranking service answered ${res.status}`);
+    const board = await res.json();
+    document.getElementById("answer").textContent = answer(board);
+    const r = board.rules;
+    document.getElementById("meta").textContent =
+      `${board.crossings} crossing${board.crossings === 1 ? "" : "s"} watched. Ranked when a crossing has at least ` +
+      `${r.min_observed_minutes} minutes of footage, ${r.min_windows} windows and ${r.min_pedestrian_minutes} pedestrian-minutes. ` +
+      `Computed ${new Date(board.generated_at * 1000).toLocaleString()}.`;
+    document.getElementById("metric").replaceChildren(table(board.tables.metric, "metric"));
+    document.getElementById("pixel").replaceChildren(table(board.tables.pixel, "pixel"));
+    document.getElementById("waiting").replaceChildren(waiting(board.not_ranked));
+    status.textContent = "";
+  } catch (err) {
+    status.textContent = `Could not load the leaderboard (${err.message}). Showing the last version loaded; retrying every minute.`;
+    const a = document.getElementById("answer");
+    if (a.textContent.startsWith("Checking")) a.textContent = "The leaderboard is not available right now.";
+  }
+}
+
+load();
+setInterval(load, REFRESH_MS);
+</script>
+</body>
+</html>

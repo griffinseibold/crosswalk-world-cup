@@ -16,3 +16,16 @@ indicators:
     partitions: 3
   cameras_dir: configs/cameras
   window_s: 60
+ranking:
+  kafka:
+    group: crosswalk-ranking
+  database: /data/ranking.sqlite3   # on the ranking PersistentVolumeClaim
+  cameras_dir: configs/cameras
+  # A crossing is ranked only with at least this much data.
+  min_observed_s: 600
+  min_windows: 5
+  min_pedestrian_minutes: 30
+  confidence: 0.95
+  period_s: null          # null: all history; e.g. 604800 for the last week
+  snapshot_every_s: 300
+  change_window_s: 86400  # rank changes are "since about a day ago"

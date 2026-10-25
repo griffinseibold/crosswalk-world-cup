@@ -35,6 +35,10 @@ crosswalk = "crosswalk.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# The leaderboard page is served from the installed package.
+crosswalk = ["ranking/*.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Lets `pytest` run from a fresh checkout without installing the package.
