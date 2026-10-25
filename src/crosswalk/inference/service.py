@@ -100,9 +100,10 @@ def run(config: InferenceConfig, *, serve: bool, predictor=None) -> dict[str, An
         log.info("signal %d: finishing the current batch and stopping", signum)
         stop.set()
 
+    previous_handlers = {}
     if threading.current_thread() is threading.main_thread():
-        signal.signal(signal.SIGTERM, handle_signal)
-        signal.signal(signal.SIGINT, handle_signal)
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            previous_handlers[signum] = signal.signal(signum, handle_signal)
 
     try:
         videos = _wait_for_videos(config, state, stop, server) if serve else resolve_videos(config)
@@ -210,6 +211,8 @@ def run(config: InferenceConfig, *, serve: bool, predictor=None) -> dict[str, An
         state["phase"] = "failed"
         raise
     finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
         metrics.ready.set(0)
         if server is not None:
             server.stop()

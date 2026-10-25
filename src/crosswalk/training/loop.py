@@ -310,6 +310,12 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
         tracker.log_dict(runtime, f"system/runtime-resume-step-{progress.step}.json")
 
     def save_checkpoint(reason: str) -> None:
+        # At an epoch boundary record the start of the next epoch, so a
+        # checkpoint taken there and one taken after the epoch rolls over
+        # describe the same position.
+        saved = state.Progress(progress.step, progress.epoch, progress.batch_in_epoch)
+        if saved.batch_in_epoch >= per_epoch:
+            saved = state.Progress(progress.step, progress.epoch + 1, 0)
         result = manager.save(
             progress.step,
             lambda path: state.save_state(
@@ -318,7 +324,7 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
                     optimizer=optimizer,
                     scheduler=scheduler,
                     scaler=scaler,
-                    progress=progress,
+                    progress=saved,
                     classes=classes,
                     config=config.model_dump(mode="json"),
                     config_hash=config_hash(config),
@@ -326,7 +332,7 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
                 ),
                 path,
             ),
-            {"epoch": progress.epoch, "batch_in_epoch": progress.batch_in_epoch, "reason": reason},
+            {"epoch": saved.epoch, "batch_in_epoch": saved.batch_in_epoch, "reason": reason},
         )
         tracker.log_metrics(
             {
@@ -367,7 +373,7 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
                 targets = [
                     {"boxes": t["boxes"].to(dev), "labels": t["labels"].to(dev)} for t in targets
                 ]
-                with torch.autocast("cuda", dtype=torch.float16, enabled=use_amp):
+                with torch.autocast(dev.type, dtype=torch.float16, enabled=use_amp):
                     losses = model(images, targets)
                     loss = sum(losses.values())
                 if not torch.isfinite(loss):

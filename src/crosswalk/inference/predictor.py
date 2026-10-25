@@ -87,7 +87,7 @@ class TorchPredictor:
         torch = self._torch
         with torch.inference_mode():
             batch = [self._to_tensor(img) for img in images]
-            with torch.autocast("cuda", dtype=torch.float16, enabled=self.autocast):
+            with torch.autocast(self.device.type, dtype=torch.float16, enabled=self.autocast):
                 outputs = self.model(batch)
             self._sync(self.device)
         threshold = self.model_config.score_threshold

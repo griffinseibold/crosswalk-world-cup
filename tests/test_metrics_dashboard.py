@@ -36,21 +36,30 @@ def test_metrics_render_and_record():
     metrics.observe_batch({"cam": 2}, timings, 0.030)
     metrics.dropped.labels(stream="cam", reason="queue_full").inc()
     metrics.errors.labels(stage="decode").inc()
+    metrics.detections.labels(label="car").inc()
     metrics.ready.set(1)
+    from prometheus_client.parser import text_string_to_metric_families
+
     text = metrics.render().decode()
-    assert 'crosswalk_frames_total{stream="cam"} 2.0' in text
-    assert "crosswalk_inference_latency_seconds_count 1.0" in text
-    assert "crosswalk_queue_wait_seconds_count 2.0" in text
-    assert 'crosswalk_batch_size_bucket{le="2.0"} 1.0' in text
-    assert 'crosswalk_frames_dropped_total{reason="queue_full",stream="cam"} 1.0' in text
-    assert 'crosswalk_errors_total{stage="decode"} 1.0' in text
-    assert 'crosswalk_model_info{hip="7.2",model="fcos",weights="COCO_V1"} 1.0' in text
-    assert "crosswalk_ready 1.0" in text
-    exported = {
-        line.split("{")[0].split(" ")[0]
-        for line in text.splitlines()
-        if line and not line.startswith("#")
-    }
+    samples = {}
+    for family in text_string_to_metric_families(text):
+        for sample in family.samples:
+            key = (sample.name, tuple(sorted(sample.labels.items())))
+            samples[key] = sample.value
+
+    def value(name, **labels):
+        return samples[(name, tuple(sorted(labels.items())))]
+
+    assert value("crosswalk_frames_total", stream="cam") == 2
+    assert value("crosswalk_inference_latency_seconds_count") == 1
+    assert value("crosswalk_queue_wait_seconds_count") == 2
+    assert value("crosswalk_batch_size_bucket", le="2.0") == 1
+    assert value("crosswalk_batch_size_bucket", le="1.0") == 0
+    assert value("crosswalk_frames_dropped_total", stream="cam", reason="queue_full") == 1
+    assert value("crosswalk_errors_total", stage="decode") == 1
+    assert value("crosswalk_model_info", model="fcos", weights="COCO_V1", hip="7.2") == 1
+    assert value("crosswalk_ready") == 1
+    exported = {name for name, _ in samples}
     for name in m.METRIC_NAMES:
         assert any(e == name or e.startswith(f"{name}_") for e in exported), name
 

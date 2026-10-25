@@ -116,6 +116,8 @@ def write_test_video(
     path: str, frames: int = 30, size: tuple[int, int] = (320, 240), fps: int = 30
 ):
     """Encode a short synthetic clip (moving box) for tests and smoke runs."""
+    from fractions import Fraction
+
     import av
 
     width, height = size
@@ -129,6 +131,9 @@ def write_test_video(
             x = (i * 5) % max(1, width - 40)
             image[height // 3 : height // 3 + 40, x : x + 40] = (255, 200, 0)
             frame = av.VideoFrame.from_ndarray(image, format="rgb24")
+            # Explicit timestamps, so decoded pts_s values are exact.
+            frame.pts = i
+            frame.time_base = Fraction(1, fps)
             for packet in stream.encode(frame):
                 container.mux(packet)
         for packet in stream.encode():

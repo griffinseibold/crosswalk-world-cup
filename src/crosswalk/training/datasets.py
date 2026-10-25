@@ -235,11 +235,11 @@ class DetectionDataset:
 
     def __getitem__(self, index: int):
         import torch
-        from torchvision.io import ImageReadMode, decode_image, read_file
+        from torchvision.io import ImageReadMode, decode_image
 
         sample = self.samples[index]
-        data = read_file(str(self.image_root / sample.image))
-        image = decode_image(data, mode=ImageReadMode.RGB).float().div_(255.0)
+        path = str(self.image_root / sample.image)
+        image = decode_image(path, mode=ImageReadMode.RGB).float().div_(255.0)
         boxes = torch.tensor(sample.boxes, dtype=torch.float32).reshape(-1, 4)
         labels = torch.tensor(sample.labels, dtype=torch.int64)
         if self.flip_prob > 0:
