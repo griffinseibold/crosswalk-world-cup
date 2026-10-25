@@ -137,6 +137,22 @@ class InferenceKafkaConfig(StreamConfig):
     resize: tuple[int, int] | None = None
 
 
+class TrackingStageConfig(StrictModel):
+    kafka: StreamConfig = Field(default_factory=lambda: StreamConfig(group="crosswalk-tracking"))
+    # ByteTrack thresholds (crosswalk.tracking.tracker.TrackerConfig).
+    high_threshold: float = Field(0.5, ge=0, le=1)
+    low_threshold: float = Field(0.1, ge=0, le=1)
+    match_iou: float = Field(0.3, gt=0, le=1)
+    low_match_iou: float = Field(0.5, gt=0, le=1)
+    min_hits: int = Field(2, ge=1)
+    max_age_s: float = Field(1.0, gt=0)
+    min_box_height: float = Field(4.0, ge=0)
+    # Frames buffered per stream to undo small reorderings from the sampler's
+    # parallel publishers.
+    reorder_window: int = Field(8, ge=0)
+    idle_timeout_s: float = Field(600.0, gt=0)
+
+
 class InferenceConfig(StrictModel):
     # file: decode recorded footage directly (Milestones 1-2, unchanged).
     # kafka: consume frame events from the sampler, publish detections.

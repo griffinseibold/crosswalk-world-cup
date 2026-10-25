@@ -1,0 +1,12 @@
+# Streaming stages after inference (chart: tracking, indicators and ranking
+# Deployments). Keys: src/crosswalk/stages.py. The Kafka broker comes from
+# KAFKA_BOOTSTRAP_SERVERS.
+tracking:
+  kafka:
+    group: crosswalk-tracking
+    partitions: 3
+  high_threshold: 0.5
+  low_threshold: 0.1
+  min_hits: 2
+  max_age_s: 1.0
+  reorder_window: 8

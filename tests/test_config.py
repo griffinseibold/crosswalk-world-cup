@@ -13,10 +13,12 @@ from crosswalk.config import (
     flatten,
     load_config,
 )
+from crosswalk.stages import StagesConfig
 from tests.conftest import repo_root
 
 CONFIGS = {
     "inference.yaml": InferenceConfig,
+    "stages.yaml": StagesConfig,
     "benchmark-a.yaml": BenchmarkConfig,
     "train-bdd100k.yaml": TrainingConfig,
     "train-synthetic.yaml": TrainingConfig,

@@ -9,6 +9,7 @@
     crosswalk make-synthetic out/          tiny dataset for smoke tests
     crosswalk hash-dataset --config train.yaml
     crosswalk sync s3://datasets/bdd100k=/scratch/data/bdd100k
+    crosswalk stage tracking --config stages.yaml   a streaming stage (Deployment)
 
 ``--set a.b=value`` overrides any config key (parsed as YAML), so a Job can
 reuse one ConfigMap'd file with per-run changes.
@@ -166,6 +167,14 @@ def cmd_sync(args) -> int:
     return 0
 
 
+def cmd_stage(args) -> int:
+    from crosswalk.stages import run_stage
+
+    state = run_stage(args.name, args.config, args.overrides, port=args.port)
+    print(json.dumps(state, indent=2, default=str))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="crosswalk", description=__doc__.split("\n\n")[0])
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -218,6 +227,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("sync", help="download s3:// prefixes to local directories")
     p.add_argument("pairs", nargs="+", metavar="s3://bucket/prefix=/local/dir")
     p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser("stage", help="run a streaming stage (tracking, indicators, ranking)")
+    p.add_argument("name", choices=["tracking", "indicators", "ranking"])
+    _config_args(p)
+    p.add_argument("--port", type=int, default=8080, help="probes, /metrics and stage routes")
+    p.set_defaults(func=cmd_stage)
 
     p = sub.add_parser(
         "hash-dataset", help="print the dataset manifests a training run would record"
