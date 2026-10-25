@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff==0.16.9
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: bash -n scripts/build-rocm-image.sh
+
+  # Everything runs on CPU with tiny synthetic data, including the
+  # SIGKILL-and-resume training test. The ROCm image is not built here; see
+  # scripts/build-rocm-image.sh.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements/*.txt
+      # helm on PATH lets tests/test_chart.py render the chart too.
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - run: pip install --requirement requirements/cpu.txt --requirement requirements/dev.txt
+      - run: pip install --no-deps --editable .
+      # -ra lists skips; nothing should be skipped here, since every
+      # optional dependency is installed. Fail if anything was.
+      - run: pytest -ra -p no:cacheprovider | tee pytest.log
+      - run: "! grep -E '^SKIPPED' pytest.log"
+
+  lint-chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - run: helm lint chart/crosswalk
+      - run: helm lint chart/crosswalk --set gpu.enabled=true --set image.gpu.tag=rocm-ci
+      - run: helm template crosswalk chart/crosswalk --namespace crosswalk >/dev/null
+      - run: >
+          helm template crosswalk chart/crosswalk --namespace crosswalk
+          --show-only templates/job.yaml --show-only templates/job-config.yaml
+          --set job.enabled=true --set-string job.kind=train --set-string job.name=ci
+          --set-file job.config=configs/train-synthetic.yaml --set job.synthetic=true >/dev/null
+
+  # Version tags (v1.2.3) publish the CPU image as :1.2.3 and :latest; pushes
+  # to main publish :main and :sha-<commit>.
+  publish-cpu-image:
+    if: github.event_name == 'push'
+    needs:
+      - lint
+      - test
+      - lint-chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: publish-image-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/griffinseibold/crosswalk-world-cup
+          flavor: latest=false
+          tags: |
+            type=ref,event=branch
+            type=sha,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.cpu
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            IMAGE=ghcr.io/griffinseibold/crosswalk-world-cup:${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
