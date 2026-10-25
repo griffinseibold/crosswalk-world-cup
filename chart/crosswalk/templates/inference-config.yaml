@@ -10,4 +10,7 @@ data:
     {{- if .Values.pipeline.enabled }}
     {{- $_ := set $config "mode" "kafka" }}
     {{- end }}
+    {{- if .Values.inference.servePromoted }}
+    {{- $_ := set $config.model "checkpoint" (printf "models:/%s@champion" .Values.inference.registeredModel) }}
+    {{- end }}
     {{- toYaml $config | nindent 4 }}

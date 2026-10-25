@@ -11,6 +11,8 @@
     crosswalk sync s3://datasets/bdd100k=/scratch/data/bdd100k
     crosswalk stage tracking --config stages.yaml   a streaming stage (Deployment)
     crosswalk demo out/ [--serve]          whole pipeline locally, no Kafka/S3/GPU
+    crosswalk promote --config train.yaml  gate a model version into @champion
+    crosswalk rollback                     move @champion back
 
 ``--set a.b=value`` overrides any config key (parsed as YAML), so a Job can
 reuse one ConfigMap'd file with per-run changes.
@@ -195,6 +197,48 @@ def cmd_demo(args) -> int:
     return 0
 
 
+def cmd_promote(args) -> int:
+    from crosswalk import promotion
+    from crosswalk.config import TrainingConfig, load_config
+
+    config = load_config(TrainingConfig, args.config, args.overrides)
+    rules = promotion.GateRules(
+        max_map_drop=args.max_map_drop,
+        min_map_gain=args.min_map_gain,
+        max_class_ap_drop=args.max_class_ap_drop,
+        max_latency_ratio=args.max_latency_ratio,
+    )
+    decision = promotion.promote(
+        config, args.model, args.version, rules, batch_size=args.batch_size,
+        latency_batches=args.latency_batches, dry_run=args.dry_run,
+    )  # fmt: skip
+    print(promotion.report(decision))
+    if args.output:
+        from crosswalk.storage import atomic_write_bytes
+
+        atomic_write_bytes(args.output, promotion.to_json(decision).encode())
+    if decision.approved and not args.dry_run:
+        print(
+            f"\n@champion now points at version {decision.candidate.version}. The inference Deployment"
+        )
+        print(
+            "loads it on restart: kubectl -n crosswalk rollout restart deployment/crosswalk-inference"
+        )
+    # Exit 1 on rejection so a CI/CD step or script can gate on it.
+    return 0 if decision.approved else 1
+
+
+def cmd_rollback(args) -> int:
+    from crosswalk import promotion
+
+    before, after = promotion.rollback(args.model, args.to, reason=args.reason)
+    print(f"@champion: version {before} -> {after}")
+    print(
+        "Restart inference to serve it: kubectl -n crosswalk rollout restart deployment/crosswalk-inference"
+    )
+    return 0
+
+
 def cmd_stage(args) -> int:
     from crosswalk.stages import run_stage
 
@@ -273,6 +317,32 @@ def build_parser() -> argparse.ArgumentParser:
         "--serve", type=int, nargs="?", const=8000, help="then serve the page on this port"
     )
     p.set_defaults(func=cmd_demo)
+
+    p = sub.add_parser(
+        "promote", help="evaluate a model version against @champion and promote it if it passes"
+    )
+    _config_args(p)
+    p.add_argument("--model", default="crosswalk-detector", help="registered model name")
+    p.add_argument("--version", help="candidate version (default: the newest)")
+    p.add_argument("--max-map-drop", type=float, default=0.0)
+    p.add_argument("--min-map-gain", type=float, default=0.0)
+    p.add_argument("--max-class-ap-drop", type=float, default=0.01, help="for the pedestrian class")
+    p.add_argument(
+        "--max-latency-ratio", type=float, default=1.2, help="candidate p95 / champion p95"
+    )
+    p.add_argument("--batch-size", type=int, default=4, help="latency check batch size")
+    p.add_argument("--latency-batches", type=int, default=20)
+    p.add_argument(
+        "--dry-run", action="store_true", help="evaluate and record, but do not move @champion"
+    )
+    p.add_argument("--output", help="also write the decision as JSON here")
+    p.set_defaults(func=cmd_promote)
+
+    p = sub.add_parser("rollback", help="move @champion back to the previous champion")
+    p.add_argument("--model", default="crosswalk-detector")
+    p.add_argument("--to", help="a specific version (default: the previous champion)")
+    p.add_argument("--reason", default="", help="recorded with the rollback")
+    p.set_defaults(func=cmd_rollback)
 
     p = sub.add_parser("stage", help="run a streaming stage (tracking, indicators, ranking)")
     p.add_argument("name", choices=["tracking", "indicators", "ranking"])

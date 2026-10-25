@@ -143,13 +143,14 @@ def restore(
 def load_model_weights(
     model, uri: str, cache_dir: str = "/tmp/crosswalk-models"
 ) -> list[str] | None:
-    """Load only the weights from a training checkpoint (local path or s3://).
+    """Load only the weights from a training checkpoint (local path or s3://)
+    or a registered model version (``models:/name@alias``).
 
-    Returns the label names (background first) stored in the checkpoint.
+    Returns the label names (background first) stored with them.
     """
-    from crosswalk.storage import fetch
+    from crosswalk.registry import load_any
 
-    state = load_state(fetch(uri, cache_dir))
+    state = load_any(uri, cache_dir)
     model.load_state_dict(state["model"])
     classes = state.get("classes")
     return ["__background__", *classes] if classes else None

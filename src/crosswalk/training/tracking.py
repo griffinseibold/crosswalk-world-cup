@@ -50,7 +50,9 @@ class NullTracker:
     def set_tags(self, tags: dict[str, Any]) -> None:
         pass
 
-    def register_model(self, model, name: str | None, metadata: dict[str, Any]) -> None:
+    def register_model(
+        self, model, name: str | None, metadata: dict[str, Any], model_config=None
+    ) -> None:
         pass
 
     def end(self, status: str = "FINISHED") -> None:
@@ -91,17 +93,30 @@ class MlflowTracker:
     def set_tags(self, tags: dict[str, Any]) -> None:
         self.mlflow.set_tags({k: str(v) for k, v in tags.items()})
 
-    def register_model(self, model, name: str | None, metadata: dict[str, Any]) -> None:
-        """Log the fine-tuned model and register a new version under ``name``."""
-        import mlflow.pytorch
+    def register_model(
+        self, model, name: str | None, metadata: dict[str, Any], model_config: dict | None = None
+    ) -> str | None:
+        """Log the fine-tuned model (state dict + config, see registry.py) and
+        register it as a new version of ``name``. Returns the version.
 
-        info = mlflow.pytorch.log_model(
+        A new version gets no alias: it serves only after ``crosswalk
+        promote`` has compared it with the champion.
+        """
+        if not name:
+            return None
+        from crosswalk import registry
+
+        version = registry.register_run_model(
+            self.run_id,
+            name,
             model,
-            name="model",
-            registered_model_name=name,
-            metadata=metadata,
+            metadata.get("classes", []),
+            model_config or {},
+            metadata,
+            self.mlflow,
         )
-        log.info("logged model %s", getattr(info, "model_uri", "model"))
+        log.info("registered %s version %s (no alias yet: run crosswalk promote)", name, version)
+        return version
 
     def end(self, status: str = "FINISHED") -> None:
         self.mlflow.end_run(status=status)

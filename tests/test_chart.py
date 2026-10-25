@@ -291,3 +291,29 @@ def test_pipeline_metrics_are_scraped():
     assert sorted(s["metadata"]["name"] for s in services) == [
         "crosswalk-indicators", "crosswalk-ingest", "crosswalk-ranking", "crosswalk-tracking",
     ]  # fmt: skip
+
+
+def test_inference_can_serve_the_promoted_champion():
+    docs = render("--set", "inference.servePromoted=true")
+    [cm] = [
+        d
+        for d in by_kind(docs, "ConfigMap")
+        if d["metadata"]["name"] == "crosswalk-inference-config"
+    ]
+    config = yaml.safe_load(cm["data"]["inference.yaml"])
+    assert config["model"]["checkpoint"] == "models:/crosswalk-detector@champion"
+
+
+def test_promote_job_never_retries_a_rejection():
+    config = repo_root() / "configs" / "train-bdd100k.yaml"
+    docs = render(
+        "--show-only", "templates/job.yaml", "--set", "job.enabled=true", "--set-string", "job.kind=promote",
+        "--set-string", "job.name=crosswalk-promote-1", "--set-file", f"job.config={config}",
+    )  # fmt: skip
+    [job] = docs
+    assert job["spec"]["backoffLimit"] == 0
+    assert pod_spec(job)["containers"][0]["args"][:3] == [
+        "promote",
+        "--config",
+        "/config/config.yaml",
+    ]

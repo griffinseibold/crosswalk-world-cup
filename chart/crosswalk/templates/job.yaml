@@ -1,6 +1,6 @@
 {{- if .Values.job.enabled }}
-{{- if not (has .Values.job.kind (list "validate" "train" "benchmark")) }}
-{{- fail "job.kind must be validate, train or benchmark" }}
+{{- if not (has .Values.job.kind (list "validate" "train" "benchmark" "promote")) }}
+{{- fail "job.kind must be validate, train, benchmark or promote" }}
 {{- end }}
 {{- if and (ne .Values.job.kind "validate") (not .Values.job.config) }}
 {{- fail "job.config is required for train and benchmark (--set-file job.config=configs/...)" }}
@@ -15,7 +15,12 @@ metadata:
 spec:
   # A killed or evicted training pod is replaced and resumes from its newest
   # checkpoint; after backoffLimit failures the Job gives up.
+  {{- if eq .Values.job.kind "promote" }}
+  # A rejection is a decision, not a crash: never retry it.
+  backoffLimit: 0
+  {{- else }}
   backoffLimit: {{ .Values.job.backoffLimit }}
+  {{- end }}
   ttlSecondsAfterFinished: {{ .Values.job.ttlSecondsAfterFinished }}
   activeDeadlineSeconds: {{ .Values.job.activeDeadlineSeconds }}
   template:
@@ -68,6 +73,15 @@ spec:
             - train
             - --config
             - /config/config.yaml
+            {{- else if eq .Values.job.kind "promote" }}
+            # The gate: score the newest version and @champion on the
+            # fixed-camera eval set, time both, record, move @champion if
+            # it passes. Exits 1 on rejection (the Job shows Failed).
+            - promote
+            - --config
+            - /config/config.yaml
+            - --output
+            - /scratch/promotion.json
             {{- else }}
             - benchmark
             - --config

@@ -56,13 +56,13 @@ class TorchPredictor:
         self.device = devices.resolve(device_name)
         self.model_config = model_config
         if model_config.checkpoint:
-            from crosswalk.storage import fetch
-            from crosswalk.training.state import load_state
+            from crosswalk import registry
 
-            # The checkpoint decides the class list (and so the head's shape).
-            # weights="none" skips downloading COCO weights that the
-            # checkpoint would overwrite anyway.
-            saved = load_state(fetch(model_config.checkpoint, "/tmp/crosswalk-models"))
+            # A training checkpoint (path or s3://) or a registered version
+            # (models:/crosswalk-detector@champion). Either decides the class
+            # list (and so the head's shape). weights="none" skips
+            # downloading COCO weights that would be overwritten anyway.
+            saved = registry.load_any(model_config.checkpoint)
             model_config = model_config.model_copy(
                 update={"classes": saved["classes"], "weights": "none"}
             )
@@ -76,6 +76,15 @@ class TorchPredictor:
         # half-precision paths; detection post-processing stays in fp32.
         self.autocast = precision == "fp16" and self.device.type == "cuda"
         self.model_version = describe_weights(model_config)
+        if model_config.checkpoint and model_config.checkpoint.startswith("models:/"):
+            # Name the exact version an alias resolved to, so detections and
+            # the dashboard say what actually served them.
+            try:
+                from crosswalk import registry
+
+                self.model_version = registry.resolve(model_config.checkpoint).describe()
+            except Exception:  # pragma: no cover - registry unreachable; keep the URI
+                pass
         self._sync = devices.synchronize
 
     def _to_tensor(self, image: np.ndarray):

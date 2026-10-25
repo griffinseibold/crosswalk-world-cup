@@ -497,7 +497,9 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
                     "dataset_sha256": manifest["sha256"],
                     "eval_map": summary.eval.get("map"),
                     "step": progress.step,
+                    "run_name": config.run_name,
                 },
+                model_config=config.model.model_dump(mode="json"),
             )
         tracker.end("FINISHED")
         _write_summary(manager, summary)

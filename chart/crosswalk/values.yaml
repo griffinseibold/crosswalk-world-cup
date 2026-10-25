@@ -96,6 +96,11 @@ mlflow:
 inference:
   # 0 stops the service (and frees the GPU), 1 runs it. One GPU, so never 2.
   replicaCount: 1
+  # Serve models:/<registeredModel>@champion from the MLflow registry (the
+  # version `crosswalk promote` approved) instead of model.checkpoint.
+  # After a promotion or rollback, restart the Deployment to load it.
+  servePromoted: false
+  registeredModel: crosswalk-detector
   # Rendered into a ConfigMap and passed as --config. Same schema as
   # configs/inference.yaml (src/crosswalk/config.py, InferenceConfig).
   # With pipeline.enabled the chart switches mode to kafka.
@@ -106,6 +111,8 @@ inference:
     model:
       name: fcos_resnet50_fpn
       weights: COCO_V1
+      # null: the pretrained COCO model. To serve the promoted fine-tuned
+      # model, set inference.servePromoted=true (below) instead of a path.
       checkpoint: null
       min_size: 720
       max_size: 1280
@@ -155,7 +162,7 @@ job:
   # Rendered only by scripts/submit-training.py (job.enabled=true with
   # --show-only), never by Argo CD.
   enabled: false
-  kind: validate        # validate | train | benchmark
+  kind: validate        # validate | train | benchmark | promote
   name: ""
   # The crosswalk YAML config for train/benchmark (--set-file job.config=...).
   config: ""

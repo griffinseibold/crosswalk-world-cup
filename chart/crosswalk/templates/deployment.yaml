@@ -23,7 +23,7 @@ spec:
         app.kubernetes.io/component: inference
       annotations:
         # Roll the pod when the config changes.
-        checksum/config: {{ printf "%s%v" (toYaml .Values.inference.config) .Values.pipeline.enabled | sha256sum }}
+        checksum/config: {{ printf "%s%v%v" (toYaml .Values.inference.config) .Values.pipeline.enabled .Values.inference.servePromoted | sha256sum }}
     spec:
       {{- include "crosswalk.podSecurity" . | nindent 6 }}
       # Lets the service finish the current batch and publish its detection file.

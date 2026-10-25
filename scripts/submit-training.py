@@ -24,6 +24,7 @@ Examples:
     scripts/submit-training.py train --config configs/train-bdd100k.yaml --image-tag rocm-abc1234
     scripts/submit-training.py benchmark --config configs/benchmark-a.yaml --image-tag rocm-abc1234
     scripts/submit-training.py train --config configs/train-bdd100k.yaml --dry-run   # print the manifest
+    scripts/submit-training.py promote --config configs/train-bdd100k.yaml --image-tag rocm-abc1234
 
 Data: training configs read datasets from /scratch/data/<name>/...; by
 convention each <name> is synced from s3://datasets/<name>/ by an init
@@ -160,7 +161,7 @@ def submit(args) -> int:
         config = read_config(config_file)
     name = job_name(args.kind, config, args.name, dt.datetime.now())
     sync: list[str] = []
-    if args.kind == "train" and not args.no_sync and not args.synthetic:
+    if args.kind in ("train", "promote") and not args.no_sync and not args.synthetic:
         sync = args.sync or derive_sync(config)
     elif args.sync:
         sync = args.sync
@@ -204,7 +205,7 @@ def submit(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("kind", choices=["train", "validate", "benchmark"])
+    parser.add_argument("kind", choices=["train", "validate", "benchmark", "promote"])
     parser.add_argument("--config", help="crosswalk YAML config (train, benchmark)")
     parser.add_argument(
         "--set",
