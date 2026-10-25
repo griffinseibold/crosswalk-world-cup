@@ -196,7 +196,8 @@ class RecordingLogger(Logger):
         return "0"
 
     def log_hyperparams(self, params, *args, **kwargs):
-        self.params = dict(params)
+        # Lightning also logs the module's (empty) hparams; keep ours.
+        self.params.update(dict(params))
 
     def log_metrics(self, metrics, step=None):
         self.metrics.append((step, dict(metrics)))

@@ -30,7 +30,6 @@ from typing import Any
 from crosswalk.config import ModelConfig, TrainingConfig, config_hash
 from crosswalk.storage import atomic_write_bytes
 from crosswalk.training import datasets, distributed, evaluate, hashing, state, tracking
-from crosswalk.training.callbacks import read_heartbeat
 from crosswalk.training.checkpoint import CheckpointManager, make_manager
 from crosswalk.training.sampling import steps_per_epoch
 
@@ -163,7 +162,7 @@ def train(config: TrainingConfig, *, s3_client=None, logger=None) -> RunSummary:
 
     from crosswalk import device as devices
     from crosswalk.models import build_detector
-    from crosswalk.training.callbacks import MetricsCallback, RecoveryCallback
+    from crosswalk.training.callbacks import MetricsCallback, RecoveryCallback, read_heartbeat
     from crosswalk.training.module import DetectorModule
 
     process_start = time.monotonic()
