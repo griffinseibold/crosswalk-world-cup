@@ -9,7 +9,8 @@ model:
   weights: COCO_V1
   score_threshold: 0.3
 source:
-  video: /data/footage/benchmark-clip.mp4   # set to null for synthetic frames
+  # Synced by the Job: submit-training.py benchmark --sync s3://datasets/footage=/scratch/data/footage
+  video: /scratch/data/footage/benchmark-clip.mp4   # null: synthetic frames
   frames: 300
   fps: null           # the clip's own frame rate
 resolutions:
@@ -31,5 +32,5 @@ mode: offline
 frames_per_run: 600
 warmup_batches: 5
 repeats: 3
-output_dir: /data/results
+output_dir: /scratch/results
 notes: ""

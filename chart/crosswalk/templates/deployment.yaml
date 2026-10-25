@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}-inference
+  labels:
+    {{- include "crosswalk.labels" . | nindent 4 }}
+    app.kubernetes.io/component: inference
+    # Deliberately no homelab.local/llm label: this app does not use the LLM.
+spec:
+  replicas: {{ .Values.inference.replicaCount }}
+  # Recreate, not RollingUpdate: with one GPU, a new pod cannot start until
+  # the old one releases it, so a rolling update would deadlock Pending.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/component: inference
+  template:
+    metadata:
+      labels:
+        {{- include "crosswalk.labels" . | nindent 8 }}
+        app.kubernetes.io/component: inference
+      annotations:
+        # Roll the pod when the config changes.
+        checksum/config: {{ toYaml .Values.inference.config | sha256sum }}
+    spec:
+      {{- include "crosswalk.podSecurity" . | nindent 6 }}
+      # Lets the service finish the current batch and publish its detection file.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: inference
+          {{- include "crosswalk.image" . | nindent 10 }}
+          args: ["serve", "--config", "/config/inference.yaml"]
+          env:
+            {{- include "crosswalk.env" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.inference.config.server.port }}
+          # Model load and kernel warmup can take minutes on first start
+          # (weight download, MIOpen kernel selection); the startup probe
+          # allows ten before liveness takes over.
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+            timeoutSeconds: 5
+          {{- include "crosswalk.resources" (dict "root" . "resources" .Values.inference.resources) | nindent 10 }}
+          {{- include "crosswalk.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - {name: config, mountPath: /config, readOnly: true}
+            - {name: cache, mountPath: /cache}
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Chart.Name }}-inference-config
+        - name: cache
+          {{- if .Values.inference.cache.persistent }}
+          persistentVolumeClaim:
+            claimName: {{ .Chart.Name }}-cache
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ .Values.inference.cache.size }}
+          {{- end }}
+        # Detection files are uploaded to S3 when each pass finishes; the
+        # local copy is scratch.
+        - name: data
+          emptyDir:
+            sizeLimit: 5Gi
+        - name: tmp
+          emptyDir: {}

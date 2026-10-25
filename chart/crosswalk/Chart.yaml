@@ -1,0 +1,6 @@
+apiVersion: v2
+name: crosswalk
+description: GPU inference service and training/validation Jobs for Crosswalk World Cup
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

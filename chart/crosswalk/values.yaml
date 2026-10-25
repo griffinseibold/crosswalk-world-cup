@@ -1,0 +1,162 @@
+# Crosswalk World Cup chart. Argo CD syncs the long-running parts (inference
+# Deployment, Service, route, dashboard); one-off Jobs are rendered from the
+# same chart by scripts/submit-training.py and never appear in Argo CD.
+
+image:
+  # gpu.enabled picks which image runs. The ROCm image is built on the
+  # homelab host (scripts/build-rocm-image.sh) and loaded straight into the
+  # cluster's nodes, so it has no registry and must not be pulled.
+  gpu:
+    repository: crosswalk-world-cup
+    tag: rocm-unset      # set to the tag build-rocm-image.sh prints
+    pullPolicy: IfNotPresent
+  # The CPU image CI publishes for each release tag.
+  cpu:
+    repository: ghcr.io/griffinseibold/crosswalk-world-cup
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+
+gpu:
+  # true: request one AMD GPU and run the ROCm image.
+  # false: no GPU request, CPU image (CI, smoke tests, and the fallback while
+  # the cluster has no GPU device plugin).
+  #
+  # amd.com/gpu is advertised by AMD's Kubernetes device plugin. Until the
+  # homelab installs it, a pod requesting it stays Pending forever with
+  # "Insufficient amd.com/gpu"; use gpu.enabled=false until then.
+  #
+  # The homelab has ONE physical GPU, which its on-demand LLM also uses. Only
+  # one pod can hold it at a time: a GPU pod here waits Pending while the LLM
+  # runs (./scripts/lab-mode.py status in the homelab repo shows who holds it;
+  # the LLM stops five minutes after nothing requests it).
+  enabled: false
+  resource: amd.com/gpu
+  # GIDs that own /dev/kfd and /dev/dri/renderD* on the host, added as
+  # supplemental groups so the non-root container user can open them.
+  # Ubuntu 24.04: video is 44; render is allocated dynamically (often 992 or
+  # 993). Check on the host with: getent group video render
+  videoGid: 44
+  renderGid: 992
+  # Only needed if the card is not recognised by the ROCm build; gfx1030 is a
+  # native target of ROCm 7.2.4, so leave empty unless validate fails with
+  # "no binary for GPU".
+  hsaOverrideGfxVersion: ""
+  nodeSelector: {}
+  tolerations: []
+
+namespace:
+  create: true
+  # The homelab Gateway admits routes only from namespaces with this label.
+  # This app does not use the homelab LLM, so it does NOT carry
+  # homelab.local/llm: requested anywhere.
+  labels:
+    gateway.homelab/access: public
+
+httpRoute:
+  enabled: true
+  # Claims crosswalk.<domain>: http://crosswalk.localhost:8080/status
+  domain: localhost
+  hostnames: []
+  parentRef:
+    name: homelab
+    namespace: gateway-system
+    sectionName: http
+
+s3:
+  endpoint: http://s3.ml-storage.svc.cluster.local:9000
+  region: us-east-1
+  # Created by the homelab: scripts/ml-credentials.sh crosswalk
+  # Keys AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.
+  credentialsSecret: s3-credentials
+
+mlflow:
+  trackingUri: http://mlflow.mlflow.svc.cluster.local:5000
+
+inference:
+  # 0 stops the service (and frees the GPU), 1 runs it. One GPU, so never 2.
+  replicaCount: 1
+  # Rendered into a ConfigMap and passed as --config. Same schema as
+  # configs/inference.yaml (src/crosswalk/config.py, InferenceConfig).
+  config:
+    device: auto
+    precision: fp32
+    model:
+      name: fcos_resnet50_fpn
+      weights: COCO_V1
+      checkpoint: null
+      min_size: 720
+      max_size: 1280
+      score_threshold: 0.3
+    batching:
+      strategy: dynamic
+      max_batch_size: 8
+      max_wait_ms: 10
+      queue_size: 64
+    source:
+      videos:
+        - s3://datasets/footage/
+      realtime: true
+      loop: true
+      resize: [1280, 720]
+      cache_dir: /cache/footage
+    output:
+      dir: /data/detections
+      s3_prefix: s3://datasets/detections/
+    server:
+      port: 8080
+  resources:
+    gpu:
+      requests: {cpu: "2", memory: 6Gi}
+      limits: {memory: 12Gi}
+    cpu:
+      requests: {cpu: 500m, memory: 2Gi}
+      limits: {memory: 4Gi}
+  # Footage downloads, torch weights and MIOpen kernel cache. emptyDir is
+  # enough; a PVC keeps them across restarts (saves re-downloading weights and
+  # re-tuning kernels on every rollout).
+  cache:
+    persistent: true
+    size: 20Gi
+    storageClassName: ""
+  serviceMonitor:
+    enabled: true
+    interval: 15s
+
+job:
+  # Rendered only by scripts/submit-training.py (job.enabled=true with
+  # --show-only), never by Argo CD.
+  enabled: false
+  kind: validate        # validate | train | benchmark
+  name: ""
+  # The crosswalk YAML config for train/benchmark (--set-file job.config=...).
+  config: ""
+  # Extra arguments after the subcommand, e.g. [--set, epochs=1].
+  args: []
+  # s3://bucket/prefix=/local/dir pairs downloaded by an init container.
+  sync: []
+  # Generate the synthetic dataset into /scratch/data/synthetic first.
+  synthetic: false
+  # A killed pod is retried (and resumes from its last checkpoint) this many
+  # times before the Job gives up.
+  backoffLimit: 4
+  # Finished Jobs (and their ConfigMaps) are deleted after a day.
+  ttlSecondsAfterFinished: 86400
+  activeDeadlineSeconds: 172800
+  # /scratch: datasets and the local checkpoint copy. Ephemeral by default;
+  # set a size and storageClassName to use a generic ephemeral PVC instead.
+  scratch:
+    sizeLimit: 100Gi
+    storageClassName: ""
+  # /dev/shm for DataLoader worker processes (the default 64 MiB is too
+  # small for batches of 720p images).
+  shmSize: 4Gi
+  resources:
+    gpu:
+      requests: {cpu: "4", memory: 12Gi}
+      limits: {memory: 24Gi}
+    cpu:
+      requests: {cpu: "2", memory: 4Gi}
+      limits: {memory: 8Gi}
+
+dashboard:
+  enabled: true

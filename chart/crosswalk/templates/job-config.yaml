@@ -1,0 +1,15 @@
+{{- if .Values.job.enabled }}
+{{- if not .Values.job.name }}{{ fail "job.name is required (scripts/submit-training.py sets it)" }}{{ end }}
+# The run's config. submit-training.py makes the Job its owner after
+# creation, so it is deleted with the Job.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.job.name }}-config
+  labels:
+    {{- include "crosswalk.labels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.job.kind }}
+data:
+  config.yaml: |
+    {{- .Values.job.config | default "{}" | nindent 4 }}
+{{- end }}

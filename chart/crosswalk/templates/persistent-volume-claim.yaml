@@ -1,0 +1,17 @@
+{{- if and .Values.inference.cache.persistent (not .Values.job.enabled) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Chart.Name }}-cache
+  labels:
+    {{- include "crosswalk.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- with .Values.inference.cache.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.inference.cache.size }}
+{{- end }}

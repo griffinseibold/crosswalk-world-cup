@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Chart.Name }}-inference-config
+  labels:
+    {{- include "crosswalk.labels" . | nindent 4 }}
+data:
+  inference.yaml: |
+    {{- toYaml .Values.inference.config | nindent 4 }}

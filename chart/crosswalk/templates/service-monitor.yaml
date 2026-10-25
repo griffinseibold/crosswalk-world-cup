@@ -1,0 +1,18 @@
+{{- if .Values.inference.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Chart.Name }}
+  labels:
+    {{- include "crosswalk.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/component: inference
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.inference.serviceMonitor.interval }}
+      scrapeTimeout: 10s
+{{- end }}

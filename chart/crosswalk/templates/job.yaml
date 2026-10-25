@@ -1,0 +1,124 @@
+{{- if .Values.job.enabled }}
+{{- if not (has .Values.job.kind (list "validate" "train" "benchmark")) }}
+{{- fail "job.kind must be validate, train or benchmark" }}
+{{- end }}
+{{- if and (ne .Values.job.kind "validate") (not .Values.job.config) }}
+{{- fail "job.config is required for train and benchmark (--set-file job.config=configs/...)" }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Values.job.name }}
+  labels:
+    {{- include "crosswalk.labels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.job.kind }}
+spec:
+  # A killed or evicted training pod is replaced and resumes from its newest
+  # checkpoint; after backoffLimit failures the Job gives up.
+  backoffLimit: {{ .Values.job.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.job.ttlSecondsAfterFinished }}
+  activeDeadlineSeconds: {{ .Values.job.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "crosswalk.labels" . | nindent 8 }}
+        app.kubernetes.io/component: {{ .Values.job.kind }}
+    spec:
+      restartPolicy: Never
+      {{- include "crosswalk.podSecurity" . | nindent 6 }}
+      {{- if or .Values.job.sync .Values.job.synthetic }}
+      initContainers:
+        - name: data
+          {{- include "crosswalk.image" . | nindent 10 }}
+          {{- if .Values.job.synthetic }}
+          args: ["make-synthetic", "/scratch/data/synthetic"]
+          {{- else }}
+          args:
+            - sync
+            {{- range .Values.job.sync }}
+            - {{ . | quote }}
+            {{- end }}
+          {{- end }}
+          env:
+            {{- include "crosswalk.env" . | nindent 12 }}
+          resources:
+            requests: {cpu: 500m, memory: 512Mi}
+            limits: {memory: 2Gi}
+          {{- include "crosswalk.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - {name: scratch, mountPath: /scratch}
+            - {name: tmp, mountPath: /tmp}
+      {{- end }}
+      containers:
+        - name: {{ .Values.job.kind }}
+          {{- include "crosswalk.image" . | nindent 10 }}
+          args:
+            {{- if eq .Values.job.kind "validate" }}
+            - validate
+            - --device
+            - {{ ternary "gpu" "cpu" .Values.gpu.enabled }}
+            {{- if not .Values.gpu.enabled }}
+            # Proves the image and wiring on CPU; the real check needs the GPU.
+            - --steps
+            - "3"
+            {{- end }}
+            - --output
+            - /scratch/validate.json
+            {{- else if eq .Values.job.kind "train" }}
+            - train
+            - --config
+            - /config/config.yaml
+            {{- else }}
+            - benchmark
+            - --config
+            - /config/config.yaml
+            - --output-dir
+            - /scratch/results
+            - --s3-prefix
+            - s3://datasets/results/
+            {{- end }}
+            {{- range .Values.job.args }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            {{- include "crosswalk.env" . | nindent 12 }}
+            - name: CROSSWALK_JOB
+              value: {{ .Values.job.name | quote }}
+          {{- include "crosswalk.resources" (dict "root" . "resources" .Values.job.resources) | nindent 10 }}
+          {{- include "crosswalk.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - {name: config, mountPath: /config, readOnly: true}
+            - {name: scratch, mountPath: /scratch}
+            - {name: cache, mountPath: /cache}
+            - {name: tmp, mountPath: /tmp}
+            - {name: dshm, mountPath: /dev/shm}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Values.job.name }}-config
+        - name: scratch
+          {{- if .Values.job.scratch.storageClassName }}
+          # A volume created with the pod and deleted with it; unlike emptyDir
+          # it does not compete with the node's root filesystem.
+          ephemeral:
+            volumeClaimTemplate:
+              spec:
+                accessModes: [ReadWriteOnce]
+                storageClassName: {{ .Values.job.scratch.storageClassName }}
+                resources:
+                  requests:
+                    storage: {{ .Values.job.scratch.sizeLimit }}
+          {{- else }}
+          emptyDir:
+            sizeLimit: {{ .Values.job.scratch.sizeLimit }}
+          {{- end }}
+        - name: cache
+          emptyDir:
+            sizeLimit: 10Gi
+        - name: tmp
+          emptyDir: {}
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.job.shmSize }}
+{{- end }}

@@ -1,0 +1,14 @@
+{{- if .Values.dashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Chart.Name }}-dashboard
+  labels:
+    {{- include "crosswalk.labels" . | nindent 4 }}
+    # The Grafana sidecar in kube-prometheus-stack loads every ConfigMap
+    # carrying this label as a dashboard.
+    grafana_dashboard: "1"
+data:
+  crosswalk-inference.json: |-
+    {{- .Files.Get "dashboards/inference.json" | nindent 4 }}
+{{- end }}
