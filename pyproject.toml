@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crosswalk-world-cup"
+version = "0.1.0"
+description = "GPU inference and training platform for road-scene object detection on a homelab AMD GPU"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Griffin Seibold" }]
+# Exact versions live in requirements/, not here. PyTorch has to come from a
+# specific wheel index (CPU) or from the rocm/pytorch base image (ROCm), so the
+# images and CI install requirements first and then this package with
+# --no-deps. The names below document what the code imports.
+dependencies = [
+  "av",
+  "boto3",
+  "mlflow-skinny",
+  "numpy",
+  "pillow",
+  "prometheus-client",
+  "pycocotools",
+  "pydantic",
+  "pyyaml",
+  "torch",
+  "torchvision",
+]
+
+[project.scripts]
+crosswalk = "crosswalk.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Lets `pytest` run from a fresh checkout without installing the package.
+pythonpath = ["src"]
+addopts = "-ra"
+markers = [
+  "slow: takes more than a few seconds (subprocess training runs)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = [
+  # Long strings in help text and docs read better unwrapped.
+  "E501",
+]
