@@ -1,0 +1,53 @@
+# ROCm image for the RX 6900 XT (gfx1030). Built on the homelab host by
+# scripts/build-rocm-image.sh, not in CI: the base image alone is tens of GB,
+# more than a GitHub-hosted runner's free disk.
+#
+# Base: AMD's image validated for ROCm 7.2.4 with PyTorch 2.9.1 and
+# torchvision 0.24.0 (rocm.docs.amd.com, "PyTorch on ROCm installation",
+# ROCm 7.2.4). gfx1030 is a listed LLVM target for that release; the RX 6900 XT
+# itself is not on AMD's officially supported card list (its siblings the
+# Radeon PRO W6800 and V620 are), which is why `crosswalk validate` is the
+# first thing to run on it. Pinned by tag; pin by digest too once pulled:
+#   docker inspect --format '{{index .RepoDigests 0}}' rocm/pytorch:<tag>
+ARG BASE=rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.9.1
+FROM ${BASE}
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    TORCH_HOME=/cache/torch \
+    MPLCONFIGDIR=/tmp \
+    # MIOpen caches tuned kernels and compiled binaries in the user's home by
+    # default; the chart mounts /cache so the cache survives pod restarts and
+    # the root filesystem can stay read-only.
+    MIOPEN_USER_DB_PATH=/cache/miopen \
+    MIOPEN_CUSTOM_CACHE_DIR=/cache/miopen
+
+WORKDIR /app
+
+# A fixed non-root user. The GPU device nodes are owned by the host's video
+# and render groups, which the chart adds as supplemental groups by GID.
+RUN groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /app app
+
+# Only non-torch dependencies; constraints-rocm.txt makes pip fail rather
+# than replace the base image's ROCm build of torch/torchvision. The base image
+# installs its Python packages system-wide (no venv), hence the flag.
+COPY requirements/ requirements/
+RUN pip install --break-system-packages --requirement requirements/rocm.txt \
+    && python3 -c "import torch, torchvision; assert torch.version.hip, 'not a ROCm torch'; print('torch', torch.__version__, 'hip', torch.version.hip, 'torchvision', torchvision.__version__)"
+
+COPY pyproject.toml README.md ./
+COPY src/ src/
+RUN pip install --break-system-packages --no-deps .
+
+ARG GIT_COMMIT=unknown
+ARG IMAGE=crosswalk-world-cup:rocm
+ENV CROSSWALK_GIT_COMMIT=${GIT_COMMIT} \
+    CROSSWALK_IMAGE=${IMAGE}
+
+USER 10001:10001
+EXPOSE 8080
+ENTRYPOINT ["crosswalk"]
+CMD ["--help"]

@@ -1,0 +1,35 @@
+# CPU image: CI tests, chart smoke tests with gpu.enabled=false, and a
+# fallback while the homelab has no GPU device plugin. Published to GHCR by CI.
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    # TorchVision downloads pretrained weights here; the chart mounts a
+    # writable volume so the read-only root filesystem is not a problem.
+    TORCH_HOME=/cache/torch \
+    MPLCONFIGDIR=/tmp
+
+WORKDIR /app
+
+RUN groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /app app
+
+# Dependencies first so code changes do not invalidate the large torch layer.
+COPY requirements/ requirements/
+RUN pip install --requirement requirements/cpu.txt
+
+COPY pyproject.toml README.md ./
+COPY src/ src/
+RUN pip install --no-deps .
+
+ARG GIT_COMMIT=unknown
+ARG IMAGE=crosswalk-world-cup:cpu
+ENV CROSSWALK_GIT_COMMIT=${GIT_COMMIT} \
+    CROSSWALK_IMAGE=${IMAGE}
+
+USER 10001:10001
+EXPOSE 8080
+ENTRYPOINT ["crosswalk"]
+CMD ["--help"]
