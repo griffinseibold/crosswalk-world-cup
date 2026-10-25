@@ -21,3 +21,4 @@ tests/promtool/rules.yaml
 
 # Local tooling and notes
 /.claude/
+/.notes/
