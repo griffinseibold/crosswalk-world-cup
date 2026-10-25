@@ -136,6 +136,9 @@ job:
   sync: []
   # Generate the synthetic dataset into /scratch/data/synthetic first.
   synthetic: false
+  # Extra environment for the main container, e.g. fault injection for
+  # Experiment B: [{name: CROSSWALK_FAULT_AT_STEP, value: "500"}].
+  env: []
   # A killed pod is retried (and resumes from its last checkpoint) this many
   # times before the Job gives up.
   backoffLimit: 4

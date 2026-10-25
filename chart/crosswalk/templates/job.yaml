@@ -84,6 +84,10 @@ spec:
             {{- include "crosswalk.env" . | nindent 12 }}
             - name: CROSSWALK_JOB
               value: {{ .Values.job.name | quote }}
+            {{- range .Values.job.env }}
+            - name: {{ .name }}
+              value: {{ .value | quote }}
+            {{- end }}
           {{- include "crosswalk.resources" (dict "root" . "resources" .Values.job.resources) | nindent 10 }}
           {{- include "crosswalk.containerSecurity" . | nindent 10 }}
           volumeMounts:

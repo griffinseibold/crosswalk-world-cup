@@ -66,6 +66,11 @@ def test_helm_command(submit, tmp_path):
     assert "job.args[0]=--set" in joined and "job.args[1]=epochs=1" in joined
     assert "job.synthetic=true" in joined
 
+    env = submit.build_parser().parse_args(["train", "--env", "CROSSWALK_FAULT_AT_STEP=500"])
+    joined = " ".join(submit.helm_command(env, "x", None, []))
+    assert "job.env[0].name=CROSSWALK_FAULT_AT_STEP" in joined
+    assert "job.env[0].value=500" in joined
+
     cpu = submit.build_parser().parse_args(["validate", "--cpu", "--image-tag", "0.1.0"])
     joined = " ".join(submit.helm_command(cpu, "v", None, []))
     assert "gpu.enabled=false" in joined and "image.cpu.tag=0.1.0" in joined

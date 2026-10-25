@@ -127,6 +127,14 @@ def helm_command(args, name: str, config_file: Path | None, sync: list[str]) -> 
             "--set-string",
             f"job.args[{2 * i + 1}]={override}",
         ]
+    for i, pair in enumerate(args.env):
+        name, _, value = pair.partition("=")
+        cmd += [
+            "--set-string",
+            f"job.env[{i}].name={name}",
+            "--set-string",
+            f"job.env[{i}].value={value}",
+        ]
     for value_file in args.values:
         cmd += ["--values", value_file]
     for raw in args.helm_set:
@@ -223,6 +231,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-sync", action="store_true", help="skip the dataset download")
     parser.add_argument(
         "--synthetic", action="store_true", help="generate the synthetic dataset instead of syncing"
+    )
+    parser.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="extra environment for the Job, e.g. CROSSWALK_FAULT_AT_STEP=500",
     )
     parser.add_argument("--values", action="append", default=[], help="extra Helm values file")
     parser.add_argument("--helm-set", action="append", default=[], help="extra raw Helm --set")
