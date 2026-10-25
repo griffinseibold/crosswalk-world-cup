@@ -49,7 +49,7 @@ FOOTAGE_RETRY_S = 60
 
 
 def _wait_for_videos(
-    config: InferenceConfig, state: dict[str, Any], stop: threading.Event
+    config: InferenceConfig, state: dict[str, Any], stop: threading.Event, server=None
 ) -> list[str]:
     """In the service, missing footage is a state, not a crash.
 
@@ -68,6 +68,11 @@ def _wait_for_videos(
             state["phase"] = "waiting for footage"
             state["footage_error"] = f"{type(err).__name__}: {err}"
             log.warning("cannot list footage (%s); retrying in %ds", err, FOOTAGE_RETRY_S)
+        if server is not None:
+            # Ready means "answering /status and /metrics usefully", which it
+            # is while waiting; crosswalk_ready stays 0 until the model loads.
+            # Otherwise Argo CD would mark a fresh, footage-less install Degraded.
+            server.ready.set()
         stop.wait(FOOTAGE_RETRY_S)
     return []
 
@@ -100,7 +105,7 @@ def run(config: InferenceConfig, *, serve: bool, predictor=None) -> dict[str, An
         signal.signal(signal.SIGINT, handle_signal)
 
     try:
-        videos = _wait_for_videos(config, state, stop) if serve else resolve_videos(config)
+        videos = _wait_for_videos(config, state, stop, server) if serve else resolve_videos(config)
         if not videos:
             return state  # stopped while waiting
         state["videos"] = [Path(v).name for v in videos]
@@ -111,6 +116,8 @@ def run(config: InferenceConfig, *, serve: bool, predictor=None) -> dict[str, An
             from crosswalk.inference.predictor import TorchPredictor
 
             state["phase"] = "loading model"
+            if server is not None:
+                server.ready.clear()
             predictor = TorchPredictor(config.model, config.device, config.precision)
             info = devices.describe(predictor.device)
             if config.source.resize:
