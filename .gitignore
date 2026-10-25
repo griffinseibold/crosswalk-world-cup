@@ -17,3 +17,4 @@ mlruns/
 
 # crosswalk demo output
 /demo-out/
+tests/promtool/rules.yaml

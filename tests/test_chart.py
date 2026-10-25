@@ -53,6 +53,7 @@ def test_default_render_follows_the_homelab_contract():
             "Deployment",
             "LocalQueue",
             "PersistentVolumeClaim",
+            "PrometheusRule",
             "Service",
             "ServiceMonitor",
             "HTTPRoute",
@@ -345,3 +346,24 @@ def test_kueue_can_be_turned_off_for_plain_clusters():
     )  # fmt: skip
     assert "kueue.x-k8s.io/queue-name" not in job["metadata"]["labels"]
     assert "suspend" not in job["spec"]
+
+
+def test_alert_rules_cover_the_pipeline_and_query_real_metrics():
+    from tests.test_metrics_dashboard import exported_metric_names
+
+    [rule] = by_kind(render("--set", "pipeline.enabled=true"), "PrometheusRule")
+    assert rule["metadata"]["labels"]["release"] == "kube-prometheus-stack"
+    alerts = {r["alert"]: r for g in rule["spec"]["groups"] for r in g["rules"]}
+    assert set(alerts) == {
+        "CrosswalkInferenceLatencyHigh", "CrosswalkStageDown", "CrosswalkStageNotConsuming",
+        "CrosswalkConsumerLagGrowing", "CrosswalkDeadLetters", "CrosswalkRankingsStale",
+    }  # fmt: skip
+    import re
+
+    used = {n for r in alerts.values() for n in re.findall(r"\bcrosswalk_[a-z_]+", r["expr"])}
+    assert used <= exported_metric_names(), used - exported_metric_names()
+    # Without the pipeline only the inference alert remains.
+    [rule] = by_kind(render(), "PrometheusRule")
+    assert [r["alert"] for g in rule["spec"]["groups"] for r in g["rules"]] == [
+        "CrosswalkInferenceLatencyHigh"
+    ]

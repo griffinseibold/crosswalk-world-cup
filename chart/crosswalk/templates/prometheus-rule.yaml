@@ -1,0 +1,88 @@
+{{- if .Values.alerts.enabled }}
+{{- $a := .Values.alerts }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Chart.Name }}
+  labels:
+    {{- include "crosswalk.labels" . | nindent 4 }}
+    # Match the kube-prometheus-stack rule selector.
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: crosswalk-inference
+      rules:
+        - alert: CrosswalkInferenceLatencyHigh
+          # p99 of per-frame end-to-end latency (queue wait + model) over
+          # 10 minutes, only while frames are flowing.
+          expr: |
+            histogram_quantile(0.99, sum by (le) (rate(crosswalk_end_to_end_latency_seconds_bucket{namespace="{{ .Release.Namespace }}"}[10m])))
+              > {{ $a.inferenceP99BudgetSeconds }}
+            and on () sum(rate(crosswalk_frames_total{namespace="{{ .Release.Namespace }}"}[10m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+            namespace: {{ .Release.Namespace }}
+          annotations:
+            summary: Inference p99 latency is over its {{ $a.inferenceP99BudgetSeconds }} s budget
+            description: Check whether the GPU is shared (lab-mode status), the batching settings, and the queue depth panel. Experiment A shows the expected latency for each batching strategy.
+    {{- if .Values.pipeline.enabled }}
+    - name: crosswalk-pipeline
+      rules:
+        - alert: CrosswalkStageDown
+          # Prometheus could not scrape a component's /metrics. (A stage
+          # waiting for Kafka still answers, so this means no running pod
+          # behind the Service, or a crashed process.)
+          expr: |
+            max by (service) (up{namespace="{{ .Release.Namespace }}", service=~"{{ .Chart.Name }}-(ingest|tracking|indicators|ranking)"}) == 0
+          for: 10m
+          labels:
+            severity: warning
+            namespace: {{ .Release.Namespace }}
+          annotations:
+            summary: "Pipeline component {{`{{ $labels.service }}`}} has been down for 10 minutes"
+            description: "kubectl -n {{ .Release.Namespace }} get pods; a stage waiting for Kafka still answers /metrics, so down means the pod is not running."
+        - alert: CrosswalkStageNotConsuming
+          expr: max by (stage) (crosswalk_stage_up{namespace="{{ .Release.Namespace }}"}) == 0
+          for: 10m
+          labels:
+            severity: warning
+            namespace: {{ .Release.Namespace }}
+          annotations:
+            summary: "Stage {{`{{ $labels.stage }}`}} is up but its consume loop is not running"
+            description: Usually Kafka is unreachable; the stage's /status page shows the error.
+        - alert: CrosswalkConsumerLagGrowing
+          # Lag above a floor and still rising: the stage cannot keep up.
+          expr: |
+            sum by (stage) (crosswalk_stage_consumer_lag{namespace="{{ .Release.Namespace }}"}) > {{ $a.minLag }}
+            and sum by (stage) (deriv(crosswalk_stage_consumer_lag{namespace="{{ .Release.Namespace }}"}[{{ $a.lagGrowingFor }}])) > 0
+          for: {{ $a.lagGrowingFor }}
+          labels:
+            severity: warning
+            namespace: {{ .Release.Namespace }}
+          annotations:
+            summary: "Consumer lag for {{`{{ $labels.stage }}`}} has grown for {{ $a.lagGrowingFor }}"
+            description: The stage is slower than its input. Scale its pods (up to the topic's partitions), check the GPU for inference, or switch the sampler to the drop policy. docs/streaming.md, "Scaling".
+        - alert: CrosswalkDeadLetters
+          expr: sum by (stage) (increase(crosswalk_stage_dead_letters_total{namespace="{{ .Release.Namespace }}"}[15m])) > 0
+          labels:
+            severity: warning
+            namespace: {{ .Release.Namespace }}
+          annotations:
+            summary: "Stage {{`{{ $labels.stage }}`}} dead-lettered events in the last 15 minutes"
+            description: "Read crosswalk.{{`{{ $labels.stage }}`}}.dlq (kafka-console-consumer in the broker pod); each record carries the error and the original event. docs/streaming.md, dead-letter topics."
+        - alert: CrosswalkRankingsStale
+          # Ingest is publishing, yet no indicator window reached the
+          # ranking store for a while.
+          expr: |
+            (time() - max(crosswalk_ranking_last_update_timestamp_seconds{namespace="{{ .Release.Namespace }}"})) > {{ $a.rankingStaleAfterSeconds }}
+            and on () sum(rate(crosswalk_ingest_frames_published_total{namespace="{{ .Release.Namespace }}"}[15m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+            namespace: {{ .Release.Namespace }}
+          annotations:
+            summary: No fresh rankings for over {{ $a.rankingStaleAfterSeconds }} s while frames are being published
+            description: Follow the lag panels stage by stage to find where events stop.
+    {{- end }}
+{{- end }}

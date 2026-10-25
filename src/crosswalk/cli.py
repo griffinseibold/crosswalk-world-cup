@@ -13,6 +13,7 @@
     crosswalk demo out/ [--serve]          whole pipeline locally, no Kafka/S3/GPU
     crosswalk promote --config train.yaml  gate a model version into @champion
     crosswalk rollback                     move @champion back
+    crosswalk replay --speed 4             load test: replay frame events at Nx
 
 ``--set a.b=value`` overrides any config key (parsed as YAML), so a Job can
 reuse one ConfigMap'd file with per-run changes.
@@ -239,6 +240,36 @@ def cmd_rollback(args) -> int:
     return 0
 
 
+def cmd_replay(args) -> int:
+    from crosswalk.stream import replay
+    from crosswalk.stream.bus import KafkaBus
+
+    bus = KafkaBus(args.bootstrap)
+    records = replay.load_jsonl(args.events) if args.events else replay.from_topic(bus)
+    if not records:
+        raise SystemExit("no frame events to replay")
+    probe = replay.kafka_lag_probe(bus.bootstrap, args.watch_groups) if args.watch_groups else None
+    result = replay.replay(
+        bus,
+        records,
+        speed=args.speed,
+        passes=args.passes,
+        partitions=args.partitions,
+        lag_probe=probe,
+    )
+    data = result.to_dict()
+    print(json.dumps({k: v for k, v in data.items() if k != "lag_samples"}, indent=2, default=str))
+    if data["lag_samples"]:
+        print("lag (records behind) per group over time:")
+        for sample in data["lag_samples"]:
+            print("  ", sample)
+    if args.output:
+        from crosswalk.storage import atomic_write_bytes
+
+        atomic_write_bytes(args.output, json.dumps(data, indent=2, default=str).encode())
+    return 0
+
+
 def cmd_stage(args) -> int:
     from crosswalk.stages import run_stage
 
@@ -343,6 +374,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--to", help="a specific version (default: the previous champion)")
     p.add_argument("--reason", default="", help="recorded with the rollback")
     p.set_defaults(func=cmd_rollback)
+
+    p = sub.add_parser(
+        "replay", help="load test: replay recorded frame events at N times their speed"
+    )
+    p.add_argument("--events", help="JSON-lines frame events (default: read crosswalk.frames.v1)")
+    p.add_argument("--speed", type=float, default=1.0, help="Nx real time; 0 = as fast as possible")
+    p.add_argument("--passes", type=int, default=1)
+    p.add_argument("--partitions", type=int, default=3, help="if the frames topic must be created")
+    p.add_argument("--bootstrap", help="Kafka bootstrap servers (default: KAFKA_BOOTSTRAP_SERVERS)")
+    p.add_argument(
+        "--watch-groups", nargs="*", default=[], metavar="GROUP",
+        help="consumer groups to sample lag for, e.g. crosswalk-inference crosswalk-tracking",
+    )  # fmt: skip
+    p.add_argument("--output", help="write the result JSON here")
+    p.set_defaults(func=cmd_replay)
 
     p = sub.add_parser("stage", help="run a streaming stage (tracking, indicators, ranking)")
     p.add_argument("name", choices=["tracking", "indicators", "ranking"])

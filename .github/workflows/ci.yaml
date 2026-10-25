@@ -68,6 +68,25 @@ jobs:
       - run: helm lint chart/crosswalk --set gpu.enabled=true --set image.gpu.tag=rocm-ci
       - run: helm lint chart/crosswalk --set pipeline.enabled=true --set httpRoute.lan.enabled=true
       - run: helm lint chart/crosswalk --set kueue.enabled=false
+      # Alert rules: syntax and unit tests with promtool from the official
+      # Prometheus release (checksum-verified).
+      - name: Install promtool
+        env:
+          PROMETHEUS_VERSION: "3.15.0"
+        run: |
+          base="https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}"
+          file="prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+          curl -sSfLO "${base}/${file}"
+          curl -sSfL "${base}/sha256sums.txt" | grep " ${file}\$" | sha256sum --check
+          tar xzf "${file}" --strip-components=1 "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+          sudo mv promtool /usr/local/bin/
+      - run: >
+          helm template crosswalk chart/crosswalk --namespace crosswalk --set pipeline.enabled=true
+          --show-only templates/prometheus-rule.yaml
+          | python3 -c 'import sys, yaml; yaml.safe_dump(yaml.safe_load(sys.stdin)["spec"], sys.stdout)'
+          > tests/promtool/rules.yaml
+      - run: promtool check rules tests/promtool/rules.yaml
+      - run: promtool test rules tests/promtool/alerts-test.yaml
       - run: helm template crosswalk chart/crosswalk --namespace crosswalk >/dev/null
       - run: >
           helm template crosswalk chart/crosswalk --namespace crosswalk

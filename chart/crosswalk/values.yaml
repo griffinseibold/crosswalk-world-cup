@@ -283,3 +283,15 @@ pipeline:
 dashboard:
   enabled: true
 
+# PrometheusRules (kube-prometheus-stack selects rules labelled
+# release: kube-prometheus-stack). Pipeline alerts render only with
+# pipeline.enabled; the inference latency alert always.
+alerts:
+  enabled: true
+  # End-to-end p99 per frame in the inference service, seconds.
+  inferenceP99BudgetSeconds: 0.5
+  # No new ranking window for this many seconds while ingest publishes.
+  rankingStaleAfterSeconds: 3600
+  # Lag must have grown for this long (and be above minLag) to alert.
+  lagGrowingFor: 15m
+  minLag: 500
