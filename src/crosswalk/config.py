@@ -315,6 +315,106 @@ class BenchmarkConfig(StrictModel):
         return value
 
 
+class TritonDynamicBatchingConfig(StrictModel):
+    # Triton's server-side batcher: requests arriving within
+    # max_queue_delay_microseconds of each other are run as one batch,
+    # preferring the listed sizes. Disabled, Triton runs each request alone.
+    enabled: bool = True
+    max_queue_delay_microseconds: int = Field(1000, ge=0)
+    preferred_batch_sizes: list[int] = Field(default_factory=list)
+
+
+class TritonServerConfig(StrictModel):
+    # The model's directory in the repository, and the name requests address.
+    model_name: str = Field("crosswalk-fcos-dense", pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+    # Where triton-benchmark finds the server's HTTP endpoint (--url overrides).
+    url: str = "http://localhost:8000"
+    # Largest batch Triton may form, from one request or several combined.
+    max_batch_size: int = Field(8, ge=1)
+    dynamic_batching: TritonDynamicBatchingConfig = Field(
+        default_factory=TritonDynamicBatchingConfig
+    )
+    # instance_group in config.pbtxt. auto leaves it out, so Triton runs one
+    # instance per visible GPU, or on the CPU when it sees none.
+    instance_kind: Literal["auto", "gpu", "cpu"] = "auto"
+    instance_count: int = Field(1, ge=1)
+    ready_timeout_s: float = Field(60.0, gt=0)
+    request_timeout_s: float = Field(30.0, gt=0)
+
+    @model_validator(mode="after")
+    def _preferred_sizes_fit(self) -> TritonServerConfig:
+        sizes = self.dynamic_batching.preferred_batch_sizes
+        if any(s < 1 or s > self.max_batch_size for s in sizes):
+            raise ValueError(
+                f"dynamic_batching.preferred_batch_sizes {sizes} must be between 1 and "
+                f"max_batch_size ({self.max_batch_size})"
+            )
+        return self
+
+
+class TritonBenchmarkConfig(StrictModel):
+    """Experiment T: the dense part of the detector served by Triton vs eager PyTorch."""
+
+    experiment: str = "T"
+    # Device for the in-process (eager) side. Export always traces on the CPU.
+    device: Device = "auto"
+    # Seeds model construction, so randomly initialised weights (fcos_tiny,
+    # weights: none) are the same model in the export and benchmark processes.
+    seed: int = 0
+    model: ModelConfig = Field(default_factory=ModelConfig)
+    # Width x height of the exported input. The detector's own transform pads
+    # every batch to a multiple of 32, so this must be one: 720p footage runs
+    # at 1280x736 inside the model.
+    resolution: tuple[int, int] = (1280, 736)
+    triton: TritonServerConfig = Field(default_factory=TritonServerConfig)
+    # Images per request. Every batch size x concurrency cell is run on both
+    # backends `repeats` times.
+    batch_sizes: list[int] = Field(default_factory=lambda: [1, 4, 8])
+    concurrency: list[int] = Field(default_factory=lambda: [1, 4])
+    # Requests per cell, split evenly across the concurrent clients.
+    requests_per_run: int = Field(200, gt=0)
+    # Each backend runs every batch size from 1 to max_batch_size this many
+    # times before measuring (Triton's batcher can form any of them).
+    warmup_requests: int = Field(10, ge=0)
+    repeats: int = Field(3, ge=1)
+    # Before timing, one batch goes through both backends and the outputs must
+    # agree within these tolerances. Loose enough for kernel differences
+    # between Triton's libtorch and in-process PyTorch (TF32 convolutions on
+    # NVIDIA), tight enough that a different model fails by orders of magnitude.
+    parity_rtol: float = Field(1e-2, ge=0)
+    parity_atol: float = Field(1e-2, ge=0)
+    output_dir: str = "results"
+    notes: str = ""
+
+    @field_validator("resolution")
+    @classmethod
+    def _multiple_of_32(cls, value: tuple[int, int]) -> tuple[int, int]:
+        if any(v <= 0 or v % 32 for v in value):
+            raise ValueError(
+                f"resolution {list(value)} must be positive multiples of 32 (the detector pads "
+                "to that anyway; use [1280, 736] for 720p footage)"
+            )
+        return value
+
+    @field_validator("concurrency", "batch_sizes")
+    @classmethod
+    def _positive(cls, value: list[int]) -> list[int]:
+        if not value or any(c < 1 for c in value):
+            raise ValueError("values must be >= 1")
+        return value
+
+    @model_validator(mode="after")
+    def _batches_fit(self) -> TritonBenchmarkConfig:
+        if max(self.batch_sizes) > self.triton.max_batch_size:
+            raise ValueError(
+                f"batch_sizes {self.batch_sizes} exceed triton.max_batch_size "
+                f"({self.triton.max_batch_size}); Triton would reject those requests"
+            )
+        if self.requests_per_run < max(self.concurrency):
+            raise ValueError("requests_per_run must give every concurrent client at least one")
+        return self
+
+
 def _parse_scalar(text: str) -> Any:
     return yaml.safe_load(text) if text != "" else ""
 

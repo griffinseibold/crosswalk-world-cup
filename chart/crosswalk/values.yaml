@@ -19,7 +19,7 @@ image:
   # The Rust frame sampler, published by CI on version tags.
   ingest:
     repository: ghcr.io/griffinseibold/crosswalk-ingest
-    tag: "0.2.0"
+    tag: "0.1.0"
     pullPolicy: IfNotPresent
 
 gpu:

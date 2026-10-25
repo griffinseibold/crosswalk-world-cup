@@ -8,6 +8,7 @@ from crosswalk.config import (
     BenchmarkConfig,
     InferenceConfig,
     TrainingConfig,
+    TritonBenchmarkConfig,
     apply_overrides,
     config_hash,
     flatten,
@@ -20,6 +21,7 @@ CONFIGS = {
     "inference.yaml": InferenceConfig,
     "stages.yaml": StagesConfig,
     "benchmark-a.yaml": BenchmarkConfig,
+    "benchmark-triton.yaml": TritonBenchmarkConfig,
     "train-bdd100k.yaml": TrainingConfig,
     "train-synthetic.yaml": TrainingConfig,
 }

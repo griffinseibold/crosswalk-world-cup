@@ -1,0 +1,40 @@
+# Experiment T: Triton Inference Server vs in-process PyTorch on the dense
+# part of the detector (backbone + FPN + heads; normalization and
+# postprocessing excluded, see src/crosswalk/benchmark/triton.py).
+#
+#   crosswalk triton-export --config configs/benchmark-triton.yaml --out /scratch/triton-models
+#   # start Triton on that repository, e.g. NVIDIA's image (pick a release whose
+#   # bundled PyTorch is at least ours, 2.9, or it may not load the TorchScript):
+#   #   docker run --rm --gpus all -p 8000:8000 -v /scratch/triton-models:/models \
+#   #     nvcr.io/nvidia/tritonserver:<release>-py3 tritonserver --model-repository /models
+#   crosswalk triton-benchmark --config configs/benchmark-triton.yaml --url http://localhost:8000
+experiment: T
+device: gpu           # the in-process side; fail rather than quietly benchmark the CPU
+seed: 0
+model:
+  name: fcos_resnet50_fpn
+  weights: COCO_V1
+# 1280x720 footage is padded to 1280x736 inside the detector, so that is the
+# shape the dense network really sees.
+resolution: [1280, 736]
+triton:
+  model_name: crosswalk-fcos-dense
+  url: http://localhost:8000
+  max_batch_size: 8
+  dynamic_batching:
+    enabled: true
+    max_queue_delay_microseconds: 2000
+    preferred_batch_sizes: [4, 8]
+  instance_kind: auto  # gpu or cpu to pin it; auto lets Triton choose
+  instance_count: 1
+  ready_timeout_s: 120
+  request_timeout_s: 30
+batch_sizes: [1, 4, 8]
+concurrency: [1, 4, 8]
+requests_per_run: 400
+warmup_requests: 10
+repeats: 3
+parity_rtol: 0.01
+parity_atol: 0.01
+output_dir: /scratch/results
+notes: ""

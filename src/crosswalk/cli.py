@@ -1,9 +1,11 @@
 """`crosswalk` command line: one entry point for every Job and the Deployment.
 
-    crosswalk validate                     Milestone 0 GPU check
+    crosswalk validate                     GPU check: train a few detector steps
     crosswalk serve   --config inf.yaml    inference service (Deployment)
     crosswalk infer   --config inf.yaml    one offline pass over the footage
     crosswalk benchmark --config bench.yaml   Experiment A
+    crosswalk triton-export --config t.yaml --out repo/   Triton model repository
+    crosswalk triton-benchmark --config t.yaml [--url URL]   Experiment T
     crosswalk train   --config train.yaml  training (resumes automatically)
     crosswalk evaluate --config train.yaml [--checkpoint s3://...]
     crosswalk make-synthetic out/          tiny dataset for smoke tests
@@ -97,6 +99,45 @@ def cmd_benchmark(args) -> int:
         return 1
     path = harness.write_result(result, args.output_dir or config.output_dir)
     print(harness.markdown_table(result))
+    print(f"\nwrote {path}")
+    if args.s3_prefix:
+        from crosswalk.storage import open_store
+
+        open_store(args.s3_prefix).put_file(str(path), path.name)
+        print(f"uploaded to {args.s3_prefix.rstrip('/')}/{path.name}")
+    return 0
+
+
+def cmd_triton_export(args) -> int:
+    from crosswalk.benchmark import triton
+    from crosswalk.config import TritonBenchmarkConfig, load_config
+
+    config = load_config(TritonBenchmarkConfig, args.config, args.overrides)
+    result = triton.export_repository(config, args.out)
+    print(json.dumps(result.to_dict(), indent=2))
+    print(f"\nwrote {result.model_dir}; serve the repository with")
+    print(f"  tritonserver --model-repository {Path(args.out).resolve()}")
+    return 0
+
+
+def cmd_triton_benchmark(args) -> int:
+    from crosswalk.benchmark import triton
+    from crosswalk.config import TritonBenchmarkConfig, load_config
+
+    config = load_config(TritonBenchmarkConfig, args.config, args.overrides)
+    if args.url:
+        # Applied to the config itself, so the result records (and hashes) the
+        # server that was actually measured.
+        config = config.model_copy(
+            update={"triton": config.triton.model_copy(update={"url": args.url})}
+        )
+    result = triton.run_benchmark(config)
+    problems = triton.validate_result(result)
+    if problems:
+        print("result failed schema validation: " + "; ".join(problems), file=sys.stderr)
+        return 1
+    path = triton.write_result(result, args.output_dir or config.output_dir)
+    print(triton.markdown_table(result))
     print(f"\nwrote {path}")
     if args.s3_prefix:
         from crosswalk.storage import open_store
@@ -283,7 +324,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("validate", help="Milestone 0: train a few detector steps on the GPU")
+    p = sub.add_parser("validate", help="GPU check: train a few detector steps on the GPU")
     p.add_argument("--device", default="gpu", help="gpu (default), rocm, cuda, auto or cpu")
     p.add_argument("--steps", type=int, default=10)
     p.add_argument("--batch-size", type=int, default=2)
@@ -307,6 +348,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output-dir", help="overrides output_dir in the config")
     p.add_argument("--s3-prefix", help="also upload the result file, e.g. s3://datasets/results/")
     p.set_defaults(func=cmd_benchmark)
+
+    p = sub.add_parser(
+        "triton-export", help="write a Triton model repository with the detector's dense network"
+    )
+    _config_args(p)
+    p.add_argument("--out", required=True, help="model repository directory")
+    p.set_defaults(func=cmd_triton_export)
+
+    p = sub.add_parser(
+        "triton-benchmark", help="Experiment T: Triton vs in-process PyTorch (dense network)"
+    )
+    _config_args(p)
+    p.add_argument("--url", help="Triton HTTP endpoint (overrides triton.url in the config)")
+    p.add_argument("--output-dir", help="overrides output_dir in the config")
+    p.add_argument("--s3-prefix", help="also upload the result file, e.g. s3://datasets/results/")
+    p.set_defaults(func=cmd_triton_benchmark)
 
     p = sub.add_parser("train", help="train or resume a run")
     _config_args(p)
