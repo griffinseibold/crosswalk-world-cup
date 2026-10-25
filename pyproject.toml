@@ -37,7 +37,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Lets `pytest` run from a fresh checkout without installing the package.
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 addopts = "-ra"
 markers = [
   "slow: takes more than a few seconds (subprocess training runs)",

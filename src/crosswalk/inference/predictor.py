@@ -55,13 +55,22 @@ class TorchPredictor:
         self._torch = torch
         self.device = devices.resolve(device_name)
         self.model_config = model_config
-        names = label_names(model_config)
-        model = build_detector(model_config)
         if model_config.checkpoint:
-            from crosswalk.training.state import load_model_weights
+            from crosswalk.storage import fetch
+            from crosswalk.training.state import load_state
 
-            names = load_model_weights(model, model_config.checkpoint) or names
-        self.names = names
+            # The checkpoint decides the class list (and so the head's shape).
+            # weights="none" skips downloading COCO weights that the
+            # checkpoint would overwrite anyway.
+            saved = load_state(fetch(model_config.checkpoint, "/tmp/crosswalk-models"))
+            model_config = model_config.model_copy(
+                update={"classes": saved["classes"], "weights": "none"}
+            )
+            model = build_detector(model_config)
+            model.load_state_dict(saved["model"])
+        else:
+            model = build_detector(model_config)
+        self.names = label_names(model_config)
         self.model = model.to(self.device).eval()
         # fp16 autocast halves activation memory and uses the GPU's faster
         # half-precision paths; detection post-processing stays in fp32.

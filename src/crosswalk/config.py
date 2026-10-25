@@ -68,6 +68,17 @@ class BatchingConfig(StrictModel):
     def effective_batch_size(self) -> int:
         return 1 if self.strategy == "sequential" else self.max_batch_size
 
+    @model_validator(mode="after")
+    def _queue_holds_a_batch(self) -> BatchingConfig:
+        # A fixed batch larger than the queue could never fill: producers
+        # would block (or drop) forever waiting for room.
+        if self.queue_size < self.effective_batch_size:
+            raise ValueError(
+                f"queue_size ({self.queue_size}) must be at least the batch size "
+                f"({self.effective_batch_size})"
+            )
+        return self
+
 
 class SourceConfig(StrictModel):
     # Recorded footage only: local files, directories, or s3://bucket/prefix/.
