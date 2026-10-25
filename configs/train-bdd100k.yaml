@@ -1,0 +1,76 @@
+# Fine-tune FCOS on a BDD100K subset, evaluate on the hand-labeled
+# fixed-camera set. Keys: src/crosswalk/config.py (TrainingConfig).
+#
+# BDD100K is not downloaded by this project: register at bdd-data.berkeley.edu,
+# accept its non-commercial license, and upload images and det_20 labels to the
+# datasets bucket yourself (docs/data.md). The paths below are inside the
+# training pod, where scripts/submit-training.py syncs them from S3.
+run_name: bdd100k-fcos-v1
+seed: 1234
+deterministic: true
+device: auto
+model:
+  name: fcos_resnet50_fpn
+  weights: COCO_V1
+  classes: [car, pedestrian, truck, bus, bicycle, motorcycle, traffic light]
+  min_size: 720
+  max_size: 1280
+  score_threshold: 0.3
+  trainable_backbone_layers: 3
+data:
+  train:
+    format: bdd100k
+    labels: /scratch/data/bdd100k/labels/det_20/det_train.json
+    images: /scratch/data/bdd100k/images/100k/train
+    category_map:
+      # BDD100K det_20 names -> project classes
+      pedestrian: pedestrian
+      rider: pedestrian
+      bicycle: bicycle
+      motorcycle: motorcycle
+    max_images: 8000
+    attribute_filter: {}
+  val:
+    format: bdd100k
+    labels: /scratch/data/bdd100k/labels/det_20/det_val.json
+    images: /scratch/data/bdd100k/images/100k/val
+    category_map: {rider: pedestrian}
+    max_images: 1000
+  eval:
+    # ~200 frames from the fixed camera, labeled in CVAT/Label Studio, COCO export.
+    format: coco
+    labels: /scratch/data/fixed-camera-eval/annotations/instances_default.json
+    images: /scratch/data/fixed-camera-eval/images
+    category_map: {person: pedestrian}
+  num_workers: 4
+  hash_images: true
+optimizer:
+  name: sgd
+  lr: 0.005
+  momentum: 0.9
+  weight_decay: 0.0001
+scheduler:
+  warmup_steps: 300
+  min_lr_ratio: 0.05
+checkpoint:
+  every_steps: 250
+  keep_last: 3
+  s3_uri: null        # defaults to s3://checkpoints/<run_name>
+  local_dir: /scratch/checkpoints
+  resume: auto
+tracking:
+  enabled: true
+  experiment: crosswalk-detector
+  registered_model_name: crosswalk-detector
+eval:
+  every_epochs: 1
+  score_threshold: 0.001
+  batch_size: 4
+  baseline: true
+  baseline_category_map: {person: pedestrian}
+epochs: 6
+batch_size: 4
+max_steps: null
+grad_clip_norm: 10.0
+amp: false            # turn on once fp32 is known good on gfx1030
+log_every_steps: 20

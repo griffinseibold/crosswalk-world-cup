@@ -1,0 +1,45 @@
+# Smoke test of the whole training platform in a minute or two, on CPU or GPU:
+# parsing, hashing, loop, checkpoints to S3, resume, evaluation, MLflow.
+# The data is written by `crosswalk make-synthetic /scratch/data/synthetic`
+# (the chart's training Job does this first when this config is used).
+run_name: synthetic-smoke
+seed: 7
+deterministic: true
+device: auto
+model:
+  name: fcos_tiny
+  weights: none
+  classes: [car, pedestrian]
+  min_size: 64
+  max_size: 96
+  score_threshold: 0.05
+data:
+  train:
+    format: bdd100k
+    labels: /scratch/data/synthetic/det_train.json
+    images: /scratch/data/synthetic/images
+  eval:
+    format: coco
+    labels: /scratch/data/synthetic/instances.json
+    images: /scratch/data/synthetic/images
+    category_map: {person: pedestrian}
+  num_workers: 0
+optimizer:
+  name: sgd
+  lr: 0.01
+scheduler:
+  warmup_steps: 5
+checkpoint:
+  every_steps: 10
+  keep_last: 2
+  local_dir: /scratch/checkpoints
+tracking:
+  enabled: true
+  experiment: crosswalk-smoke
+  registered_model_name: null
+eval:
+  baseline: false     # the COCO baseline needs the real model and weights
+  batch_size: 4
+epochs: 5
+batch_size: 4
+log_every_steps: 5

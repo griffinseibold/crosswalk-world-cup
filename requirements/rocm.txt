@@ -1,0 +1,14 @@
+# ROCm image: PyTorch comes from the base image, not from pip.
+#
+# docker/Dockerfile.rocm starts from
+#   rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.9.1
+# which AMD validates for ROCm 7.2.4 with torch 2.9.1 and torchvision 0.24.0.
+# Installing torch from pip on top would replace AMD's build, so this file adds
+# only the non-torch dependencies, and constraints-rocm.txt stops pip from
+# "upgrading" torch or torchvision while resolving them.
+#
+# Alternative without the base image (e.g. a slimmer custom image): the
+# upstream ROCm 6.4 wheels,
+#   pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/rocm6.4
+-c constraints-rocm.txt
+-r base.txt

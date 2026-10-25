@@ -1,0 +1,6 @@
+# Versions shipped in rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.9.1.
+# AMD's builds carry local version suffixes (e.g. 2.9.1+rocm7.2.4...), which
+# satisfy these specifiers; anything that would need a different torch fails
+# the build instead of silently replacing it.
+torch>=2.9.1,<2.10
+torchvision>=0.24.0,<0.25

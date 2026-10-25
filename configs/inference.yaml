@@ -1,0 +1,29 @@
+# Inference service (chart: inference Deployment). Keys and defaults are
+# documented in src/crosswalk/config.py (InferenceConfig).
+device: auto          # GPU when the pod has one, CPU otherwise
+precision: fp32
+model:
+  name: fcos_resnet50_fpn
+  weights: COCO_V1    # pretrained COCO detector; set checkpoint to serve a fine-tuned one
+  checkpoint: null
+  min_size: 720
+  max_size: 1280
+  score_threshold: 0.3
+batching:
+  strategy: dynamic
+  max_batch_size: 8
+  max_wait_ms: 10
+  queue_size: 64
+source:
+  # Recorded footage only (blurred before upload; see docs/data.md).
+  videos:
+    - s3://datasets/footage/
+  realtime: true      # pace like a camera; drop frames the GPU cannot keep up with
+  loop: true
+  resize: [1280, 720]
+  cache_dir: /cache/footage
+output:
+  dir: /data/detections
+  s3_prefix: null     # e.g. s3://datasets/detections/
+server:
+  port: 8080

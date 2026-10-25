@@ -1,0 +1,17 @@
+# Runtime dependencies other than PyTorch, pinned exactly. Shared by the CPU
+# and ROCm images so both run the same library versions; only the torch build
+# differs. Versions are the PyPI releases current in October 2026.
+#
+# av bundles its own FFmpeg in the wheel, so this pin is also the decoder pin.
+av==19.0.2
+boto3==1.43.118
+# mlflow-skinny: the tracking client without the server, UI or SQL storage
+# (the homelab runs the server). Same version as the server keeps the REST API
+# in step.
+mlflow-skinny==3.17.2
+numpy==2.5.4
+pillow==12.3.0
+prometheus-client==0.26.0
+pycocotools==2.0.11
+pydantic==2.14.1
+pyyaml==6.0.3

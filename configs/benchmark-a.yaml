@@ -1,0 +1,35 @@
+# Experiment A: throughput and latency by batching strategy, resolution and
+# concurrency. Methodology: docs/benchmarks.md. Run with
+#   crosswalk benchmark --config configs/benchmark-a.yaml
+experiment: A
+device: gpu           # fail rather than quietly benchmark the CPU
+precision: fp32
+model:
+  name: fcos_resnet50_fpn
+  weights: COCO_V1
+  score_threshold: 0.3
+source:
+  video: /data/footage/benchmark-clip.mp4   # set to null for synthetic frames
+  frames: 300
+  fps: null           # the clip's own frame rate
+resolutions:
+  - [1280, 720]
+  - [960, 540]
+strategies:
+  - name: sequential
+    batching: {strategy: sequential, max_batch_size: 1, max_wait_ms: 0, queue_size: 64}
+  - name: fixed-4
+    batching: {strategy: fixed, max_batch_size: 4, max_wait_ms: 0, queue_size: 64}
+  - name: fixed-8
+    batching: {strategy: fixed, max_batch_size: 8, max_wait_ms: 0, queue_size: 64}
+  - name: dynamic-8-10ms
+    batching: {strategy: dynamic, max_batch_size: 8, max_wait_ms: 10, queue_size: 64}
+  - name: dynamic-8-25ms
+    batching: {strategy: dynamic, max_batch_size: 8, max_wait_ms: 25, queue_size: 64}
+concurrency: [1, 2, 4]
+mode: offline
+frames_per_run: 600
+warmup_batches: 5
+repeats: 3
+output_dir: /data/results
+notes: ""
