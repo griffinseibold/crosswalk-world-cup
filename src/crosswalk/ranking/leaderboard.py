@@ -1,8 +1,7 @@
 """Turn stored indicator windows into a leaderboard.
 
-The question on the page is deliberately absurd, "where is the safest place
-on Earth to cross the street right now?", and the answer is deliberately
-careful. A crossing's position is decided by rules anyone can check:
+The question on the page is "where is the safest place on Earth to cross
+the street right now?", and the answer is deliberately careful. A crossing's position is decided by rules anyone can check:
 
 1. **Aggregate** each camera's windows over the observation period:
    total observed video time, pedestrian and vehicle exposure, and event

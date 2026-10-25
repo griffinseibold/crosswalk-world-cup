@@ -109,7 +109,7 @@ footage, and MIOpen's kernel database, so tuned kernels survive restarts),
 
 | Image | Built by | Used for |
 | --- | --- | --- |
-| `ghcr.io/griffinseibold/crosswalk-world-cup:<version>` | CI, on version tags (CPU PyTorch) | `gpu.enabled=false`, and always for tracking, indicators and ranking |
+| `ghcr.io/griffinseibold/crosswalk-world-cup:<version>` | CI: `:<version>` on version tags, `:main` and `:sha-<commit>` on every push to `main` (CPU PyTorch) | `gpu.enabled=false`, and always for tracking, indicators and ranking |
 | `ghcr.io/griffinseibold/crosswalk-ingest:<version>` | CI, on version tags | The Rust frame sampler |
 | `crosswalk-world-cup:rocm-<commit>` | `scripts/build-rocm-image.sh` on the GPU host | `gpu.enabled=true` on AMD |
 | `crosswalk-world-cup:cuda-<commit>` | `docker build -f docker/Dockerfile.cuda` on the GPU host | NVIDIA ([deploy/nvidia](../deploy/nvidia/README.md)) |
@@ -176,8 +176,8 @@ Before turning it on:
    `--set-file pipeline.cameras.<name>=configs/cameras/<name>.yaml` (or in
    the Argo CD application's values). A clip belongs to the camera whose
    `camera_id` matches its file name up to the first `__`: both
-   `lankershim-01.mp4` and `lankershim-01__2005-06-16.mp4` belong to camera
-   `lankershim-01`.
+   `ngsim-lankershim.mp4` and `ngsim-lankershim__2005-06-16.mp4` belong to
+   camera `ngsim-lankershim`.
 3. Blurred clips are in `s3://datasets/footage/` ([data](data.md)).
 
 The leaderboard is then at <http://crosswalk.localhost:8080/>, and the
@@ -252,8 +252,8 @@ scripts/submit-training.py benchmark --config configs/benchmark-a.yaml \
 - **Kills and evictions.** A killed training pod is replaced, up to
   `job.backoffLimit` times, and resumes from its newest checkpoint in
   `s3://checkpoints/<run_name>/`. If the Job has given up, delete it and
-  submit again; training resumes from the checkpoint. Use a new `run_name` to
-  start fresh.
+  submit again; training resumes from the checkpoint. Use a new `run_name`
+  (in the config, or `--set run_name=...`) to start fresh.
 - **Several GPUs.** `--gpus N` (train only) launches `torchrun` with one
   DistributedDataParallel process per GPU in one pod. `batch_size` in the
   config is per GPU, and the learning rate is not rescaled. The resume hash
@@ -301,7 +301,7 @@ Deployment again afterwards.
 | --- | --- |
 | GPU pod Pending, `Insufficient amd.com/gpu` | Something else holds the card (`kubectl get pods -A` with a GPU request), or the device plugin is not installed; use `gpu.enabled=false` until it is |
 | Job stays suspended | Kueue has not admitted it: `kubectl -n crosswalk get workloads` and `kubectl describe clusterqueue gpu` |
-| `ErrImageNeverPull` / `ErrImagePull` for `crosswalk-world-cup:rocm-…` | The image is not on that node: rerun `scripts/build-rocm-image.sh` and check `image.gpu.tag` |
+| `ErrImagePull` / `ImagePullBackOff` for `crosswalk-world-cup:rocm-…` | The image is not on that node: rerun `scripts/build-rocm-image.sh` and check `image.gpu.tag` |
 | Helm error "gpu.enabled=true needs image.gpu.tag" | Build the GPU image and set the tag it printed |
 | `validate` says `PyTorch sees no GPU` | `/dev/kfd` or `/dev/dri` missing in the pod (`kubectl exec … -- ls -l /dev/kfd /dev/dri`), or the render GID is wrong (permission denied in the logs) |
 | `hipErrorNoBinaryForGPU` | The PyTorch build has no kernels for this GPU. Check `rocminfo` on the host. As a last resort, set `gpu.hsaOverrideGfxVersion=10.3.0` and rerun validate |

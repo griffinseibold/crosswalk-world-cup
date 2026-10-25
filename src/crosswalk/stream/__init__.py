@@ -1,4 +1,4 @@
-"""Milestone 3: the streaming pipeline between the stages.
+"""The streaming pipeline between the stages.
 
 Kafka topics connect the stages; each stage is a consumer group that can be
 scaled by adding pods (up to the topic's partition count)::

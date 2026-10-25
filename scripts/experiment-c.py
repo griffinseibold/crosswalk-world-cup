@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -162,8 +163,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--namespace", default="crosswalk")
     p.add_argument(
         "--context",
-        default="kind-homelab-dev",
-        help="kubectl context (homelab-dev after the k3s move)",
+        default=os.environ.get("CROSSWALK_KUBE_CONTEXT", "kind-homelab-dev"),
+        help="kubectl context (default $CROSSWALK_KUBE_CONTEXT or kind-homelab-dev)",
     )
     p.add_argument("--timeout", type=float, default=7200)
     p.add_argument("--output-dir", default="results")

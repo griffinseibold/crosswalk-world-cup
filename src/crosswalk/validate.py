@@ -1,4 +1,4 @@
-"""Milestone 0: prove PyTorch can train a TorchVision detector on this GPU.
+"""GPU check: prove PyTorch can train a TorchVision detector on this GPU.
 
 Run before anything else on new hardware or a new image. It needs no dataset
 and no downloads: a randomly initialised FCOS-ResNet50-FPN takes a few

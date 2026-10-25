@@ -103,13 +103,16 @@ crosswalk demo demo-out --serve
 `crosswalk demo` generates two crossings, one where drivers yield and one
 where they do not, and runs them through the real tracking, indicators and
 ranking code. It prints the resulting table and serves the leaderboard at
-<http://localhost:8000>. (The demo finds the generated shapes with a simple
-colour detector, because a model trained on real photos sees nothing in
-coloured rectangles. Everything after detection is production code.)
+<http://localhost:8000>. Two things differ from a real deployment: the demo
+finds the generated shapes with a simple colour detector (a model trained on
+real photos sees nothing in coloured rectangles), and it uses 15-second
+windows and much smaller ranking minimums, so two minutes of generated video
+per crossing can be ranked. Everything else is production code.
 
 Add `--video` to encode the scene as a real clip and decode it with PyAV, or
 `--ingest-bin ingest/target/release/crosswalk-ingest` to sample it with the
-Rust frame sampler (`cargo build --release` in `ingest/`).
+Rust frame sampler (`cargo build --release` in `ingest/`; needs `ffmpeg` and
+`ffprobe` on PATH).
 
 Run the tests:
 

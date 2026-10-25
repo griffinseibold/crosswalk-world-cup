@@ -75,7 +75,7 @@ class DetectionWriter:
 
     Lines go to ``<name>.jsonl.partial``; :meth:`close` renames it to
     ``<name>.jsonl`` and optionally uploads it, so a reader (or a later
-    Milestone 3 consumer) never picks up a half-written file.
+    downstream consumer) never picks up a half-written file.
     """
 
     def __init__(self, out_dir: str, store=None, prefix: str = ""):

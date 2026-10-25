@@ -69,10 +69,10 @@ httpRoute:
     name: homelab
     namespace: gateway-system
     sectionName: http
-  # Home-network access per the homelab's LAN contract (docs/operations.md
-  # there): adds crosswalk.lab.internal on the Gateway's `lan` listener and
-  # labels the namespace gateway.homelab/lan: "true". Off by default: anyone
-  # on the Wi-Fi could open the page. Add the name to the router's DNS too.
+  # Local-network access: adds crosswalk.lab.internal on the Gateway's `lan`
+  # listener and labels the namespace gateway.homelab/lan: "true". Off by
+  # default: anyone on the local network could open the page. Add the name
+  # to the router's DNS too.
   lan:
     enabled: false
     hostname: crosswalk.lab.internal
@@ -100,8 +100,8 @@ kafka:
 s3:
   endpoint: http://s3.ml-storage.svc.cluster.local:9000
   region: us-east-1
-  # Created by the homelab: scripts/ml-credentials.py crosswalk
-  # Keys AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.
+  # Keys AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY (docs/deployment.md,
+  # "Deploying").
   credentialsSecret: s3-credentials
 
 mlflow:
@@ -216,8 +216,8 @@ job:
       requests: {cpu: "2", memory: 4Gi}
       limits: {memory: 8Gi}
 
-# Milestone 3: the streaming pipeline. Off by default so the chart still
-# installs where Kafka does not exist; turn on once the homelab's Kafka is up.
+# The streaming pipeline. Off by default so the chart installs where Kafka
+# does not exist; set true once Kafka is reachable.
 pipeline:
   enabled: false
   ingest:
@@ -280,8 +280,8 @@ pipeline:
       period_s: null
       snapshot_every_s: 300
       change_window_s: 86400
-  # Per-camera configs (configs/cameras/*.yaml): name -> YAML text. The
-  # chart ships the example from the repository (--set-file works too).
+  # Per-camera configs (configs/cameras/*.yaml): name -> YAML text, added to
+  # the examples in chart/crosswalk/files/cameras/ (--set-file works too).
   cameras: {}
   serviceMonitor:
     interval: 15s

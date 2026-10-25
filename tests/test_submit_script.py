@@ -102,3 +102,10 @@ def test_gpus_flag_sets_job_gpus_only_above_one(submit):
     assert "job.gpus=4" in submit.helm_command(args, "t", None, [])
     args = submit.build_parser().parse_args(["train", "--config", "c.yaml"])
     assert "job.gpus" not in " ".join(submit.helm_command(args, "t", None, []))
+
+
+def test_run_name_override_names_the_job(submit):
+    config = submit.with_overrides({"run_name": "bdd100k-fcos-v1"}, ["epochs=1", "run_name=expb-1"])
+    now = dt.datetime(2026, 10, 25)
+    assert submit.job_name("train", config, None, now) == "crosswalk-train-expb-1"
+    assert submit.with_overrides({"run_name": "a"}, ["epochs=1"]) == {"run_name": "a"}

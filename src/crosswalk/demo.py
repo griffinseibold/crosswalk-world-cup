@@ -1,4 +1,4 @@
-"""``crosswalk demo``: the whole Milestone 3 pipeline in one process.
+"""``crosswalk demo``: the whole streaming pipeline in one process.
 
 No Kafka, no S3, no GPU: the same stage code as the cluster, wired to the
 in-memory bus (:class:`~crosswalk.stream.bus.MemoryBus`) and a local

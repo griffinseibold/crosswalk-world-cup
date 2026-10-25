@@ -313,8 +313,9 @@ CUDA versions next to the numbers.
 
 Experiment A's config, unchanged, on the NVIDIA GPU with exclusive access
 (`gpu_time_slicing_replicas: 1`). Compare the median rows cell by cell with
-the RX 6900 XT's. Note the price and generation of each card: the point is
-how the same software behaves on both stacks, not a verdict on vendors.
+the RX 6900 XT's: how many cameras at 5 fps one card of each kind can keep
+up with. Note the price and generation of each card; this is not a verdict
+on vendors.
 
 | GPU | Resolution | Strategy | Concurrency | Throughput (fps) | p50 (ms) | p99 (ms) | Result file |
 | --- | --- | --- | --- | --- | --- | --- | --- |

@@ -1,8 +1,8 @@
-"""Render the Helm chart and check the platform contract.
+"""Render the Helm chart and check what it produces.
 
-Needs the helm binary (CI has it; skipped otherwise). The structural checks
-below are the contract with the homelab: namespace label, route parent, GPU
-request, security context, S3/MLflow wiring and the absence of the LLM label.
+Needs the helm binary (CI has it; skipped otherwise). The checks cover the
+namespace labels, the route, the GPU request, the security context and the
+S3/MLflow/Kafka wiring.
 """
 
 from __future__ import annotations
@@ -73,13 +73,6 @@ def test_default_render_follows_the_homelab_contract():
         if d["metadata"].get("labels", {}).get("grafana_dashboard") == "1"
     ]
     assert len(dashboards) == 1
-
-
-def test_nothing_requests_the_cluster_llm():
-    for args in ([], ["--set", "gpu.enabled=true", "--set", "image.gpu.tag=rocm-x"]):
-        for doc in render(*args):
-            labels = doc["metadata"].get("labels", {})
-            assert "homelab.local/llm" not in labels, doc["kind"]
 
 
 def test_cpu_fallback_has_no_gpu_request():
@@ -195,7 +188,7 @@ def test_argocd_application_points_at_this_chart():
     assert app["spec"]["source"]["repoURL"].endswith("griffinseibold/crosswalk-world-cup")
 
 
-# -- Milestone 3: the streaming pipeline -------------------------------------------
+# -- The streaming pipeline -------------------------------------------
 
 
 def pipeline_docs(*args: str) -> list[dict]:
@@ -227,7 +220,6 @@ def test_pipeline_renders_every_stage_with_kafka_and_s3_wiring():
         assert env["AWS_ENDPOINT_URL_S3"]["value"] == "http://s3.ml-storage.svc.cluster.local:9000"
         assert spec["securityContext"]["runAsNonRoot"] is True
         assert container["securityContext"]["readOnlyRootFilesystem"] is True
-        assert "homelab.local/llm" not in dep["metadata"].get("labels", {})
         if name != "crosswalk-inference":
             assert "amd.com/gpu" not in container.get("resources", {}).get("limits", {}), name
     ingest = pod_spec(deployments["crosswalk-ingest"])

@@ -33,7 +33,7 @@ class ModelConfig(StrictModel):
     # CPU. It shares every code path with the real model except the backbone.
     name: Literal["fcos_resnet50_fpn", "fcos_tiny"] = "fcos_resnet50_fpn"
     # "COCO_V1" loads TorchVision's pretrained COCO detector; "none" starts
-    # from random weights (the Milestone 0 validation uses this so it needs no
+    # from random weights (the GPU check, `crosswalk validate`, uses this so it needs no
     # download).
     weights: Literal["COCO_V1", "none"] = "COCO_V1"
     # A fine-tuned checkpoint to load instead: a local path or s3:// URI of a
@@ -154,7 +154,7 @@ class TrackingStageConfig(StrictModel):
 
 
 class InferenceConfig(StrictModel):
-    # file: decode recorded footage directly (Milestones 1-2, unchanged).
+    # file: decode recorded footage directly (no Kafka).
     # kafka: consume frame events from the sampler, publish detections.
     mode: Literal["file", "kafka"] = "file"
     device: Device = "auto"

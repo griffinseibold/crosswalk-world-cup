@@ -52,7 +52,7 @@ pub struct Args {
     )]
     inputs: Vec<PathBuf>,
 
-    /// all | fps:<rate> | every:<n>
+    /// all | fps:<rate> | every:<n> | motion:<idle fps>-<busy fps>[@<cells>]
     #[arg(long, env = "CROSSWALK_INGEST_SAMPLING", default_value = "fps:5", value_parser = Policy::parse)]
     sampling: Policy,
 

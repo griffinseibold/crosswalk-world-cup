@@ -72,6 +72,20 @@ def read_config(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def with_overrides(config: dict, overrides: list[str]) -> dict:
+    """Apply top-level ``--set key=value`` overrides that change the Job itself.
+
+    Only ``run_name`` matters here: it names the Job, so ``--set run_name=x``
+    must give Job ``crosswalk-train-x``, not the config file's run name.
+    """
+    config = dict(config)
+    for item in overrides:
+        key, sep, value = item.partition("=")
+        if sep and key.strip() == "run_name" and value.strip():
+            config["run_name"] = value.strip()
+    return config
+
+
 def derive_sync(config: dict) -> list[str]:
     """s3://datasets/<name>=/scratch/data/<name> for every dataset the config reads."""
     names: list[str] = []
@@ -168,7 +182,7 @@ def submit(args) -> int:
             print(f"{args.kind} needs --config", file=sys.stderr)
             return 2
         config_file = Path(args.config).resolve()
-        config = read_config(config_file)
+        config = with_overrides(read_config(config_file), args.overrides)
     name = job_name(args.kind, config, args.name, dt.datetime.now())
     sync: list[str] = []
     if args.kind in ("train", "promote") and not args.no_sync and not args.synthetic:

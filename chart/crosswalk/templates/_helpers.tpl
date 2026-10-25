@@ -5,7 +5,7 @@
 {{- end -}}
 {{- $img := ternary .Values.image.gpu .Values.image.cpu .Values.gpu.enabled -}}
 {{- if and .Values.gpu.enabled (has $img.tag (list "rocm-unset" "cuda-unset")) -}}
-{{- fail "gpu.enabled=true needs image.gpu.tag: build it with scripts/build-rocm-image.sh and set the tag it prints" -}}
+{{- fail "gpu.enabled=true needs image.gpu.tag: build the GPU image (scripts/build-rocm-image.sh, or docker/Dockerfile.cuda for NVIDIA) and set its tag" -}}
 {{- end -}}
 image: "{{ $img.repository }}:{{ $img.tag }}"
 imagePullPolicy: {{ $img.pullPolicy }}
@@ -39,8 +39,8 @@ app.kubernetes.io/part-of: crosswalk-world-cup
 {{/*
 Pod-level security. Non-root, no privilege escalation, RuntimeDefault seccomp.
 With a GPU, the video and render groups are added so the non-root user can
-open /dev/kfd and /dev/dri/renderD*. That is the one relaxation ROCm needs
-compared with hello-crud; no privileged mode, no hostPath, no added
+open /dev/kfd and /dev/dri/renderD*. That is the one relaxation ROCm needs;
+no privileged mode, no hostPath, no added
 capabilities (the device plugin injects the device nodes).
 */}}
 {{- define "crosswalk.podSecurity" -}}

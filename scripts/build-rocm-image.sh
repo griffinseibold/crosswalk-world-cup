@@ -5,7 +5,7 @@
 # runs. The cluster then uses it without a registry (imagePullPolicy:
 # IfNotPresent and a tag that never moves).
 #
-#   scripts/build-rocm-image.sh                 # build, load into Kind (today's homelab)
+#   scripts/build-rocm-image.sh                 # build, load into Kind (the default)
 #   RUNTIME=k3s scripts/build-rocm-image.sh     # build, import into k3s containerd
 #   RUNTIME=none scripts/build-rocm-image.sh    # build only
 #
@@ -66,10 +66,9 @@ esac
 cat <<EOF
 
 Built ${IMAGE}. Point the chart at it, for example as Argo CD parameters:
-  image.repository=${REPOSITORY}
-  image.tag=${TAG}
-  image.pullPolicy=IfNotPresent
-or one-off:
-  helm template crosswalk chart/crosswalk --namespace crosswalk \\
-    --set image.repository=${REPOSITORY} --set image.tag=${TAG} ...
+  gpu.enabled=true
+  image.gpu.repository=${REPOSITORY}
+  image.gpu.tag=${TAG}
+or for a Job:
+  scripts/submit-training.py validate --image-tag ${TAG}
 EOF

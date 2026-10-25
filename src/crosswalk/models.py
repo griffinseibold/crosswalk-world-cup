@@ -133,7 +133,7 @@ def build_detector(config: ModelConfig, *, for_training: bool = False):
             _replace_classification_head(model, project_classes)
         return model
 
-    # Random initialisation (Milestone 0 validation): no download needed.
+    # Random initialisation (the GPU check): no download needed.
     return fcos_resnet50_fpn(
         weights=None,
         weights_backbone=None,

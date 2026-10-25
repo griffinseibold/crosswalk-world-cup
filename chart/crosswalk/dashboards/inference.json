@@ -759,7 +759,7 @@
     {
       "id": 16,
       "type": "row",
-      "title": "Streaming pipeline (Milestone 3)",
+      "title": "Streaming pipeline",
       "gridPos": {
         "x": 0,
         "y": 44,
