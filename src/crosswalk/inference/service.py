@@ -45,6 +45,33 @@ def resolve_videos(config: InferenceConfig) -> list[str]:
     return local
 
 
+FOOTAGE_RETRY_S = 60
+
+
+def _wait_for_videos(
+    config: InferenceConfig, state: dict[str, Any], stop: threading.Event
+) -> list[str]:
+    """In the service, missing footage is a state, not a crash.
+
+    A fresh install has an empty footage prefix until someone uploads blurred
+    clips. Exiting would crash-loop the Deployment; instead the status page
+    says what is missing and the source is checked again every minute.
+    """
+    while not stop.is_set():
+        try:
+            return resolve_videos(config)
+        except (SystemExit, FileNotFoundError, OSError) as err:
+            state["phase"] = "waiting for footage"
+            state["footage_error"] = str(err)
+            log.warning("no footage yet (%s); retrying in %ds", err, FOOTAGE_RETRY_S)
+        except Exception as err:  # e.g. S3 credentials or endpoint wrong
+            state["phase"] = "waiting for footage"
+            state["footage_error"] = f"{type(err).__name__}: {err}"
+            log.warning("cannot list footage (%s); retrying in %ds", err, FOOTAGE_RETRY_S)
+        stop.wait(FOOTAGE_RETRY_S)
+    return []
+
+
 def _output_store(config: InferenceConfig):
     if config.output.s3_prefix:
         return storage.open_store(config.output.s3_prefix)
@@ -73,7 +100,9 @@ def run(config: InferenceConfig, *, serve: bool, predictor=None) -> dict[str, An
         signal.signal(signal.SIGINT, handle_signal)
 
     try:
-        videos = resolve_videos(config)
+        videos = _wait_for_videos(config, state, stop) if serve else resolve_videos(config)
+        if not videos:
+            return state  # stopped while waiting
         state["videos"] = [Path(v).name for v in videos]
 
         gpu_memory = None
