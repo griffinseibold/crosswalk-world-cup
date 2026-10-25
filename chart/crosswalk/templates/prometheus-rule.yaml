@@ -25,7 +25,7 @@ spec:
             namespace: {{ .Release.Namespace }}
           annotations:
             summary: Inference p99 latency is over its {{ $a.inferenceP99BudgetSeconds }} s budget
-            description: Check whether the GPU is shared (lab-mode status), the batching settings, and the queue depth panel. Experiment A shows the expected latency for each batching strategy.
+            description: Check whether another workload is holding the GPU, the batching settings, and the queue depth panel. Experiment A shows the expected latency for each batching strategy.
     {{- if .Values.pipeline.enabled }}
     - name: crosswalk-pipeline
       rules:

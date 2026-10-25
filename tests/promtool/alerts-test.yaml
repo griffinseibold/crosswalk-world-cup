@@ -16,6 +16,9 @@ tests:
         alertname: CrosswalkDeadLetters
         exp_alerts:
           - exp_labels: {severity: warning, namespace: crosswalk, stage: inference}
+            exp_annotations:
+              description: "Read crosswalk.inference.dlq (kafka-console-consumer in the broker pod); each record carries the error and the original event. docs/streaming.md, dead-letter topics."
+              summary: "Stage inference dead-lettered events in the last 15 minutes"
 
   - name: lag that keeps growing fires, steady lag does not
     interval: 1m
@@ -29,6 +32,9 @@ tests:
         alertname: CrosswalkConsumerLagGrowing
         exp_alerts:
           - exp_labels: {severity: warning, namespace: crosswalk, stage: tracking}
+            exp_annotations:
+              description: "The stage is slower than its input. Scale its pods (up to the topic's partitions), check the GPU for inference, or switch the sampler to the drop policy. docs/streaming.md, \"Scaling\"."
+              summary: "Consumer lag for tracking has grown for 15m"
 
   - name: a component that cannot be scraped is down
     interval: 1m
@@ -42,6 +48,9 @@ tests:
         alertname: CrosswalkStageDown
         exp_alerts:
           - exp_labels: {severity: warning, namespace: crosswalk, service: crosswalk-tracking}
+            exp_annotations:
+              description: "kubectl -n crosswalk get pods; a stage waiting for Kafka still answers /metrics, so down means the pod is not running."
+              summary: "Pipeline component crosswalk-tracking has been down for 10 minutes"
 
   - name: rankings go stale only while frames are flowing
     interval: 1m
@@ -58,6 +67,9 @@ tests:
         alertname: CrosswalkRankingsStale
         exp_alerts:
           - exp_labels: {severity: warning, namespace: crosswalk}
+            exp_annotations:
+              description: "Follow the lag panels stage by stage to find where events stop."
+              summary: "No fresh rankings for over 3600 s while frames are being published"
 
   - name: inference p99 over budget while frames flow
     interval: 1m
@@ -76,3 +88,6 @@ tests:
         alertname: CrosswalkInferenceLatencyHigh
         exp_alerts:
           - exp_labels: {severity: warning, namespace: crosswalk}
+            exp_annotations:
+              description: "Check whether another workload is holding the GPU, the batching settings, and the queue depth panel. Experiment A shows the expected latency for each batching strategy."
+              summary: "Inference p99 latency is over its 0.5 s budget"

@@ -39,12 +39,10 @@
           - "nvidia-utils-{{ nvidia_driver_branch }}-server"
         update_cache: true
         state: present
-      register: driver
+      notify: Reboot to load the new kernel module
 
-    - name: Reboot to load the new kernel module
-      ansible.builtin.reboot:
-        reboot_timeout: 900
-      when: driver.changed
+    - name: Reboot now if the driver changed, before anything uses it
+      ansible.builtin.meta: flush_handlers
 
     - name: The driver sees the GPU
       ansible.builtin.command: nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
@@ -81,7 +79,7 @@
         state: present
 
     # -- k3s --------------------------------------------------------------------
-    - name: k3s configuration (NVIDIA as the default runtime)
+    - name: Write the k3s configuration (NVIDIA as the default runtime)
       ansible.builtin.copy:
         dest: /etc/rancher/k3s/config.yaml
         mode: "0600"
@@ -108,7 +106,7 @@
       ansible.builtin.command: k3s kubectl wait --for=condition=Ready node --all --timeout=300s
       changed_when: false
 
-    - name: k3s added the NVIDIA runtime to containerd
+    - name: Check that k3s added the NVIDIA runtime to containerd
       ansible.builtin.command: grep -q nvidia /var/lib/rancher/k3s/agent/etc/containerd/config.toml
       changed_when: false
 
@@ -162,10 +160,23 @@
     # The smoke pod uses the same base image as docker/Dockerfile.cuda, so the
     # pull is not wasted: the CUDA image build reuses its layers.
     - name: Run a CUDA smoke pod (PyTorch sees the GPU inside Kubernetes)
+      vars:
+        gpu_smoke_overrides:
+          spec:
+            containers:
+              - name: gpu-smoke
+                image: "{{ cuda_smoke_image }}"
+                command:
+                  - python
+                  - -c
+                  - "import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0), torch.version.cuda)"
+                resources:
+                  limits:
+                    nvidia.com/gpu: 1
       ansible.builtin.shell: |
         k3s kubectl delete pod gpu-smoke --ignore-not-found
         k3s kubectl run gpu-smoke --restart=Never --image={{ cuda_smoke_image }} \
-          --overrides='{"spec":{"containers":[{"name":"gpu-smoke","image":"{{ cuda_smoke_image }}","command":["python","-c","import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0), torch.version.cuda)"],"resources":{"limits":{"nvidia.com/gpu":1}}}]}}'
+          --overrides='{{ gpu_smoke_overrides | to_json }}'
         k3s kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/gpu-smoke --timeout=900s
         k3s kubectl logs gpu-smoke
         k3s kubectl delete pod gpu-smoke
@@ -189,3 +200,8 @@
           - "Tunnel: ssh -N -L 6443:127.0.0.1:6443 {{ ansible_user }}@{{ ansible_host }}"
           - "Then follow deploy/nvidia/README.md: build the CUDA image on the VM, install the chart with values-nvidia.yaml."
           - "BILLING: this VM costs money every hour it exists. Tear it down when done (README.md checklist)."
+
+  handlers:
+    - name: Reboot to load the new kernel module
+      ansible.builtin.reboot:
+        reboot_timeout: 900

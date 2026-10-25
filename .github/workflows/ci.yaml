@@ -56,6 +56,11 @@ jobs:
         env:
           CROSSWALK_INGEST_BIN: ${{ github.workspace }}/ingest/target/release/crosswalk-ingest
       - run: "! grep -E '^SKIPPED' pytest.log"
+      # Surface failing tests as annotations on the run summary.
+      - if: failure()
+        run: >
+          grep -E '^(FAILED|ERROR) ' pytest.log | head -n 20
+          | sed -e 's/%/%25/g' -e 's/^/::error title=pytest::/' || true
 
   lint-chart:
     runs-on: ubuntu-latest
