@@ -1,0 +1,17 @@
+# NVIDIA overrides: helm ... --values chart/crosswalk/values-nvidia.yaml
+# (or scripts/submit-training.py --values chart/crosswalk/values-nvidia.yaml).
+# Pair with the single-node k3s that deploy/nvidia/ sets up on a rented VM.
+gpu:
+  enabled: true
+  vendor: nvidia
+  resource: nvidia.com/gpu
+image:
+  gpu:
+    repository: crosswalk-world-cup
+    tag: cuda-unset     # set to the tag you built from docker/Dockerfile.cuda
+    pullPolicy: IfNotPresent
+# The rented VM has no Kueue, Gateway or homelab Kafka unless you add them.
+kueue:
+  enabled: false
+httpRoute:
+  enabled: false

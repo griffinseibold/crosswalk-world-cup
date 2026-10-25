@@ -1,0 +1,9 @@
+# ansible-lint configuration for deploy/nvidia (CI runs `ansible-lint` here).
+profile: production
+exclude_paths:
+  - inventory.example.ini
+skip_list:
+  # curl | sh and curl | gpg are the upstream-documented install steps for
+  # k3s, helm and the NVIDIA repository key; each task has `creates:`.
+  - command-instead-of-module
+  - risky-shell-pipe

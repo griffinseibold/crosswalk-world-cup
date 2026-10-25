@@ -1,0 +1,22 @@
+# Remove everything site.yml installed from the VM (k3s, images, the device
+# plugin, DCGM), leaving the NVIDIA driver. This does NOT delete the VM or
+# stop billing: do that in your provider's console (README.md checklist).
+#
+#   ansible-playbook -i inventory.ini teardown.yml
+- name: Remove k3s and the NVIDIA Kubernetes components
+  hosts: gpu
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Uninstall k3s (removes the cluster, its images and volumes)
+      ansible.builtin.command: /usr/local/bin/k3s-uninstall.sh
+      args:
+        removes: /usr/local/bin/k3s-uninstall.sh
+
+    - name: Remove leftover configuration and helm
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/rancher/k3s
+        - /usr/local/bin/helm

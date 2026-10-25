@@ -1,0 +1,3 @@
+# Keep the base image's CUDA torch and torchvision (see requirements/cuda.txt).
+torch>=2.9.1,<2.10
+torchvision>=0.24.0,<0.25

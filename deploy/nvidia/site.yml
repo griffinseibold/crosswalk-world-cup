@@ -1,0 +1,191 @@
+# Turn a fresh Ubuntu 24.04 VM with one NVIDIA GPU into a single-node k3s
+# that runs Crosswalk World Cup's CUDA image:
+#
+#   NVIDIA driver -> NVIDIA Container Toolkit -> k3s (detects the runtime,
+#   default runtime nvidia) -> NVIDIA device plugin (time-slicing) -> DCGM
+#   exporter (GPU metrics) -> kubeconfig copied back to you.
+#
+#   ansible-playbook -i inventory.ini site.yml
+#
+# Idempotent: running it again changes nothing that is already right. It
+# does not create, resize or delete the VM itself (that is your provider's
+# console or CLI, deliberately outside this repository), and it never
+# touches any cloud API. Tear down with README.md's checklist.
+- name: Single-node k3s with an NVIDIA GPU
+  hosts: gpu
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Refuse anything but Ubuntu 24.04 (the only tested target)
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "Ubuntu"
+          - ansible_distribution_version == "24.04"
+        fail_msg: "This playbook targets Ubuntu 24.04; found {{ ansible_distribution }} {{ ansible_distribution_version }}."
+
+    - name: Check that the machine actually has an NVIDIA GPU on the PCI bus
+      ansible.builtin.shell: lspci -nn | grep -i 'nvidia' | grep -Ei 'vga|3d|display'
+      register: gpu_pci
+      changed_when: false
+      failed_when: gpu_pci.rc != 0
+
+  tasks:
+    # -- driver ---------------------------------------------------------------
+    - name: Install the NVIDIA server driver and utilities from Ubuntu
+      ansible.builtin.apt:
+        name:
+          - "nvidia-driver-{{ nvidia_driver_branch }}-server"
+          - "nvidia-utils-{{ nvidia_driver_branch }}-server"
+        update_cache: true
+        state: present
+      register: driver
+
+    - name: Reboot to load the new kernel module
+      ansible.builtin.reboot:
+        reboot_timeout: 900
+      when: driver.changed
+
+    - name: The driver sees the GPU
+      ansible.builtin.command: nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
+      register: smi
+      changed_when: false
+
+    - name: Show the GPU
+      ansible.builtin.debug:
+        msg: "{{ smi.stdout }}"
+
+    # -- container toolkit ------------------------------------------------------
+    - name: NVIDIA Container Toolkit signing key
+      ansible.builtin.shell: >
+        curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey
+        | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+      args:
+        creates: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+
+    - name: NVIDIA Container Toolkit apt repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/nvidia-container-toolkit.list
+        content: |
+          deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/$(ARCH) /
+        mode: "0644"
+
+    - name: Install the NVIDIA Container Toolkit (pinned)
+      ansible.builtin.apt:
+        name:
+          - "nvidia-container-toolkit={{ nvidia_container_toolkit_version }}"
+          - "nvidia-container-toolkit-base={{ nvidia_container_toolkit_version }}"
+          - "libnvidia-container-tools={{ nvidia_container_toolkit_version }}"
+          - "libnvidia-container1={{ nvidia_container_toolkit_version }}"
+        update_cache: true
+        state: present
+
+    # -- k3s --------------------------------------------------------------------
+    - name: k3s configuration (NVIDIA as the default runtime)
+      ansible.builtin.copy:
+        dest: /etc/rancher/k3s/config.yaml
+        mode: "0600"
+        content: |
+          # k3s detects nvidia-container-runtime at start and adds it to
+          # containerd; making it the default means pods need no
+          # runtimeClassName (https://docs.k3s.io/advanced, NVIDIA Container
+          # Runtime Support).
+          default-runtime: nvidia
+          write-kubeconfig-mode: "0600"
+          # The API server listens on the VM; reach it through an SSH tunnel,
+          # never by opening 6443 in the provider's firewall (README.md).
+          disable:
+            - traefik
+
+    - name: Install k3s (pinned)
+      ansible.builtin.shell: >
+        curl -sfL https://get.k3s.io
+        | INSTALL_K3S_VERSION='{{ k3s_version }}' sh -s - server
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for the node to be Ready
+      ansible.builtin.command: k3s kubectl wait --for=condition=Ready node --all --timeout=300s
+      changed_when: false
+
+    - name: k3s added the NVIDIA runtime to containerd
+      ansible.builtin.command: grep -q nvidia /var/lib/rancher/k3s/agent/etc/containerd/config.toml
+      changed_when: false
+
+    # -- helm, device plugin, DCGM exporter -------------------------------------------
+    - name: Install helm (pinned)
+      ansible.builtin.shell: >
+        curl -fsSL https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz
+        | tar -xz -C /usr/local/bin --strip-components=1 linux-amd64/helm
+      args:
+        creates: /usr/local/bin/helm
+
+    - name: Device plugin time-slicing config
+      ansible.builtin.template:
+        src: time-slicing.yaml.j2
+        dest: /etc/rancher/k3s/nvidia-time-slicing.yaml
+        mode: "0644"
+
+    - name: NVIDIA device plugin (time-slicing)
+      ansible.builtin.command: >
+        helm upgrade --install nvdp nvidia-device-plugin
+        --repo https://nvidia.github.io/k8s-device-plugin
+        --version {{ nvidia_device_plugin_chart_version }}
+        --namespace nvidia-device-plugin --create-namespace
+        --set-file config.map.default=/etc/rancher/k3s/nvidia-time-slicing.yaml
+        --wait --timeout 10m
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: true
+
+    - name: DCGM exporter (GPU utilisation, memory, power, temperature)
+      ansible.builtin.command: >
+        helm upgrade --install dcgm-exporter dcgm-exporter
+        --repo https://nvidia.github.io/dcgm-exporter/helm-charts
+        --version {{ dcgm_exporter_chart_version }}
+        --namespace gpu-monitoring --create-namespace
+        --set serviceMonitor.enabled=false
+        --wait --timeout 10m
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: true
+
+    - name: The node advertises the time-sliced GPU
+      ansible.builtin.shell: >
+        k3s kubectl get nodes -o jsonpath='{.items[0].status.allocatable.nvidia\.com/gpu}'
+      register: allocatable
+      changed_when: false
+      until: allocatable.stdout | int == gpu_time_slicing_replicas | int
+      retries: 30
+      delay: 10
+
+    # The smoke pod uses the same base image as docker/Dockerfile.cuda, so the
+    # pull is not wasted: the CUDA image build reuses its layers.
+    - name: Run a CUDA smoke pod (PyTorch sees the GPU inside Kubernetes)
+      ansible.builtin.shell: |
+        k3s kubectl delete pod gpu-smoke --ignore-not-found
+        k3s kubectl run gpu-smoke --restart=Never --image={{ cuda_smoke_image }} \
+          --overrides='{"spec":{"containers":[{"name":"gpu-smoke","image":"{{ cuda_smoke_image }}","command":["python","-c","import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0), torch.version.cuda)"],"resources":{"limits":{"nvidia.com/gpu":1}}}]}}'
+        k3s kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/gpu-smoke --timeout=900s
+        k3s kubectl logs gpu-smoke
+        k3s kubectl delete pod gpu-smoke
+      register: smoke
+      changed_when: false
+
+    - name: Show the smoke test
+      ansible.builtin.debug:
+        msg: "{{ smoke.stdout_lines }}"
+
+    - name: Copy the kubeconfig back (API server stays on 127.0.0.1 via SSH tunnel)
+      ansible.builtin.fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "{{ kubeconfig_local_path }}"
+        flat: true
+
+    - name: Next steps
+      ansible.builtin.debug:
+        msg:
+          - "kubeconfig: {{ kubeconfig_local_path }} (server https://127.0.0.1:6443)"
+          - "Tunnel: ssh -N -L 6443:127.0.0.1:6443 {{ ansible_user }}@{{ ansible_host }}"
+          - "Then follow deploy/nvidia/README.md: build the CUDA image on the VM, install the chart with values-nvidia.yaml."
+          - "BILLING: this VM costs money every hour it exists. Tear it down when done (README.md checklist)."

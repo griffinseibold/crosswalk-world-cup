@@ -1,0 +1,13 @@
+# NVIDIA device plugin config (passed with --set-file config.map.default=...).
+# https://github.com/NVIDIA/k8s-device-plugin#shared-access-to-gpus-with-cuda-time-slicing
+version: v1
+sharing:
+  timeSlicing:
+    # Keep the resource name nvidia.com/gpu so the chart's requests do not
+    # change; a pod asking for 2 would get two slices of the same GPU, which
+    # is meaningless here, so refuse it.
+    renameByDefault: false
+    failRequestsGreaterThanOne: true
+    resources:
+      - name: nvidia.com/gpu
+        replicas: {{ gpu_time_slicing_replicas }}

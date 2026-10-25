@@ -1,0 +1,18 @@
+# Versions, pinned. Each was checked against its project's releases in
+# October 2026; see README.md for the sources.
+k3s_version: v1.36.5+k3s1            # same k3s release as the homelab
+nvidia_driver_branch: "580"          # Ubuntu's nvidia-driver-<branch>-server package
+nvidia_container_toolkit_version: "1.20.0-1"
+nvidia_device_plugin_chart_version: "0.20.0"
+dcgm_exporter_chart_version: "4.8.4"
+helm_version: v3.19.0                # matches CI
+# Same base as docker/Dockerfile.cuda (PyTorch 2.9.1, CUDA 12.8, cuDNN 9).
+cuda_smoke_image: pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
+
+# Time-slicing: the device plugin advertises one physical GPU as this many
+# nvidia.com/gpu, so that many pods can share it (no memory isolation).
+# 1 disables sharing. The time-slicing p99 experiment varies this.
+gpu_time_slicing_replicas: 4
+
+# Where k3s writes the kubeconfig you copy back (fetch task below).
+kubeconfig_local_path: "{{ playbook_dir }}/kubeconfig-{{ inventory_hostname }}.yaml"

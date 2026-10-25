@@ -141,6 +141,8 @@ def helm_command(args, name: str, config_file: Path | None, sync: list[str]) -> 
             "--set-string",
             f"job.env[{i}].value={value}",
         ]
+    if getattr(args, "gpus", 1) > 1:
+        cmd += ["--set", f"job.gpus={args.gpus}"]
     if getattr(args, "no_kueue", False):
         cmd += ["--set", "kueue.enabled=false"]
     for value_file in args.values:
@@ -252,6 +254,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="NAME=VALUE",
         help="extra environment for the Job, e.g. CROSSWALK_FAULT_AT_STEP=500",
+    )
+    parser.add_argument(
+        "--gpus",
+        type=int,
+        default=1,
+        help="train only: GPUs for one DistributedDataParallel Job (torchrun, one process each)",
     )
     parser.add_argument(
         "--no-kueue", action="store_true", help="plain Job, not queued (cluster without Kueue)"

@@ -95,3 +95,10 @@ def test_no_kueue_flag(submit):
     assert "kueue.enabled=false" in " ".join(submit.helm_command(args, "v", None, []))
     args = submit.build_parser().parse_args(["validate"])
     assert "kueue.enabled" not in " ".join(submit.helm_command(args, "v", None, []))
+
+
+def test_gpus_flag_sets_job_gpus_only_above_one(submit):
+    args = submit.build_parser().parse_args(["train", "--config", "c.yaml", "--gpus", "4"])
+    assert "job.gpus=4" in submit.helm_command(args, "t", None, [])
+    args = submit.build_parser().parse_args(["train", "--config", "c.yaml"])
+    assert "job.gpus" not in " ".join(submit.helm_command(args, "t", None, []))

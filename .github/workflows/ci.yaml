@@ -94,6 +94,23 @@ jobs:
           --set job.enabled=true --set-string job.kind=train --set-string job.name=ci
           --set-file job.config=configs/train-synthetic.yaml --set job.synthetic=true >/dev/null
 
+  # The NVIDIA provisioning playbook: lint and syntax only (it never runs
+  # against a machine in CI).
+  ansible:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/nvidia
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ansible-core==2.21.4 ansible-lint==26.10.0
+      - run: cp inventory.example.ini inventory.ini
+      - run: ansible-playbook -i inventory.ini --syntax-check site.yml teardown.yml
+      - run: ansible-lint site.yml teardown.yml
+
   # The Rust frame sampler. rustup reads ingest/rust-toolchain.toml and
   # installs the pinned compiler on first use; --locked fails the build if
   # Cargo.lock is out of date instead of silently re-resolving.

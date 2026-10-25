@@ -1,0 +1,8 @@
+# CUDA image: PyTorch comes from the base image, not from pip.
+#
+# docker/Dockerfile.cuda starts from pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime,
+# which ships torch 2.9.1 and its matching torchvision. Installing torch from
+# pip on top would replace that build, so this file adds only the non-torch
+# dependencies, and constraints-cuda.txt stops pip from "upgrading" torch.
+-c constraints-cuda.txt
+-r base.txt

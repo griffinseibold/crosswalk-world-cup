@@ -34,7 +34,7 @@ from typing import Any
 
 from crosswalk.config import ModelConfig, TrainingConfig, config_hash
 from crosswalk.storage import atomic_write_bytes
-from crosswalk.training import datasets, evaluate, hashing, state
+from crosswalk.training import datasets, distributed, evaluate, hashing, state
 from crosswalk.training.checkpoint import CheckpointManager, make_manager
 from crosswalk.training.sampling import ResumableSampler, steps_per_epoch
 from crosswalk.training.schedule import WarmupCosine
@@ -66,10 +66,15 @@ class ResumeMismatch(RuntimeError):
     pass
 
 
-def resume_hash(config: TrainingConfig) -> str:
+def resume_hash(config: TrainingConfig, world_size: int = 1) -> str:
     import hashlib
 
     subset = {k: v for k, v in config.model_dump(mode="json").items() if k in RESUME_KEYS}
+    if world_size > 1:
+        # The global batch is batch_size * world_size: resuming with another
+        # process count would silently change it. (Single-process runs leave
+        # the key out, so their checkpoints hash exactly as before.)
+        subset["world_size"] = world_size
     # The checkpoint to *start* from is irrelevant once a run has its own.
     subset["model"].pop("checkpoint", None)
     # Loader parallelism and hashing effort do not change what is trained on.
@@ -184,8 +189,20 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
     classes = list(config.model.classes or [])
     state.seed_everything(config.seed, config.deterministic)
     dev = devices.resolve(config.device)
+    # torchrun sets RANK/WORLD_SIZE; without them this is a no-op and the
+    # rest of the function is the single-process path (see distributed.py).
+    dist = distributed.from_env()
+    backend = distributed.init(dist, dev.type)
+    if dist.enabled and dev.type == "cuda":
+        dev = torch.device("cuda", dist.local_rank)
+    main = dist.is_main
     runtime = devices.describe(dev)
-    log.info("device %s (%s)", dev, runtime.get("gpu_name") or "cpu")
+    if backend:
+        runtime.update({"distributed_backend": backend, "world_size": dist.world_size})
+    log.info(
+        "device %s (%s)%s", dev, runtime.get("gpu_name") or "cpu",
+        f", rank {dist.rank}/{dist.world_size} ({backend})" if dist.enabled else "",
+    )  # fmt: skip
 
     # -- data -----------------------------------------------------------------
     train_parsed, val_parsed, eval_parsed = _datasets(config, classes)
@@ -201,8 +218,13 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
     train_ds = datasets.DetectionDataset(
         train_parsed, config.data.train.images, train=True, seed=config.seed
     )
-    sampler = ResumableSampler(len(train_ds), config.batch_size, config.seed)
-    per_epoch = steps_per_epoch(len(train_ds), config.batch_size)
+    # Order of *global* batches (batch_size per process x processes); each
+    # process takes its slice. With one process both are the same sampler.
+    global_batch = config.batch_size * dist.world_size
+    sampler = ResumableSampler(len(train_ds), global_batch, config.seed)
+    if dist.enabled:
+        sampler = distributed.ShardedSampler(sampler, dist)
+    per_epoch = steps_per_epoch(len(train_ds), global_batch)
     total_steps = per_epoch * config.epochs
     if config.max_steps is not None:
         total_steps = min(total_steps, config.max_steps)
@@ -239,7 +261,21 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
     log.info("checkpoints: %s", storage_desc)
     heartbeat = _read_heartbeat(manager)
     restore_t0 = time.monotonic()
+    # Rank 0 looks first (and downloads); the others then find its local
+    # copy instead of racing to write the same file.
+    if not main:
+        distributed.barrier(dist)
     found = manager.find_latest()
+    if main:
+        distributed.barrier(dist)
+    # Every rank must restore the same step, or the replicas diverge from the
+    # first update (e.g. a rank on another node without the local copy).
+    chosen = distributed.broadcast_object(found.step if found else None, dist)
+    if (found.step if found else None) != chosen:
+        raise RuntimeError(
+            f"rank {dist.rank} found checkpoint step {found.step if found else None} "
+            f"but rank 0 restored {chosen}; give every rank the same checkpoint storage"
+        )
     if config.checkpoint.resume == "never" and found is not None:
         raise ResumeMismatch(
             f"run {config.run_name!r} already has checkpoints and checkpoint.resume=never; "
@@ -253,13 +289,14 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
     progress = state.Progress()
     mlflow_run_id = None
     resume_info: dict[str, Any] | None = None
-    rhash = resume_hash(config)
+    rhash = resume_hash(config, dist.world_size)
     if found is not None:
         saved = state.load_state(str(found.path))
         if saved.get("extra", {}).get("resume_hash") != rhash:
             raise ResumeMismatch(
                 f"checkpoint step {found.step} was written with a different training config "
-                "(seed, model, data, optimizer, schedule or batch size changed); use a new run_name"
+                "(seed, model, data, optimizer, schedule, batch size or number of processes changed); "
+                "use a new run_name"
             )
         progress = state.restore(
             saved, model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler
@@ -281,11 +318,18 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
         }
         log.info("resumed from step %d (%s): %s", progress.step, found.source, resume_info)
     resumed = found is not None
+    # After restoring, so every replica starts from the same weights (DDP
+    # also broadcasts rank 0's on construction).
+    train_model = distributed.wrap(model, dist, dev.type)
 
     # -- tracking ----------------------------------------------------------------
     if tracker is None:
+        # One MLflow run per training run: only rank 0 tracks.
         tracker = make_tracker(
-            config.tracking.enabled, config.tracking.experiment, config.run_name, mlflow_run_id
+            config.tracking.enabled and main,
+            config.tracking.experiment,
+            config.run_name,
+            mlflow_run_id,
         )
     if not resumed:
         tracker.log_params(config.model_dump(mode="json"))
@@ -310,6 +354,13 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
         tracker.log_dict(runtime, f"system/runtime-resume-step-{progress.step}.json")
 
     def save_checkpoint(reason: str) -> None:
+        # Replicas are identical, so rank 0 writes the one checkpoint; the
+        # others wait here, so nobody is a step ahead of what was saved.
+        if main:
+            _save_checkpoint(reason)
+        distributed.barrier(dist)
+
+    def _save_checkpoint(reason: str) -> None:
         # At an epoch boundary record the start of the next epoch, so a
         # checkpoint taken there and one taken after the epoch rolls over
         # describe the same position.
@@ -374,7 +425,7 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
                     {"boxes": t["boxes"].to(dev), "labels": t["labels"].to(dev)} for t in targets
                 ]
                 with torch.autocast(dev.type, dtype=torch.float16, enabled=use_amp):
-                    losses = model(images, targets)
+                    losses = train_model(images, targets)
                     loss = sum(losses.values())
                 if not torch.isfinite(loss):
                     raise FloatingPointError(
@@ -415,7 +466,11 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
                             **{f"quality/{k}": float(v.item()) for k, v in losses.items()},
                             "quality/lr": scheduler.get_last_lr()[0],
                             "quality/grad_norm": grad_norm,
-                            "system/images_per_s": window_images / elapsed if elapsed > 0 else None,
+                            # All processes together (each sees its own slice).
+                            "system/images_per_s": window_images * dist.world_size / elapsed
+                            if elapsed > 0
+                            else None,
+                            "system/world_size": dist.world_size,
                             "system/step_s": elapsed / max(1, window_images / config.batch_size),
                             "system/data_wait_fraction": window_data_wait / elapsed
                             if elapsed > 0
@@ -429,7 +484,8 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
                         "step %d/%d epoch %d loss %.4f lr %.2e",
                         progress.step, total_steps, epoch, loss.item(), scheduler.get_last_lr()[0],
                     )  # fmt: skip
-                    _write_heartbeat(manager, progress.step, epoch)
+                    if main:
+                        _write_heartbeat(manager, progress.step, epoch)
                     window_t0, window_images, window_data_wait = time.monotonic(), 0, 0.0
 
                 if progress.step % config.checkpoint.every_steps == 0:
@@ -444,7 +500,7 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
             if progress.batch_in_epoch >= per_epoch:
                 progress.epoch += 1
                 progress.batch_in_epoch = 0
-                if val_parsed and progress.epoch % config.eval.every_epochs == 0:
+                if main and val_parsed and progress.epoch % config.eval.every_epochs == 0:
                     metrics = _evaluate(
                         model, val_parsed, config.data.val.images, config, dev, classes
                     )
@@ -452,6 +508,7 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
                         evaluate.finite(evaluate.prefixed(metrics, "quality/val").items()),
                         progress.step,
                     )
+                distributed.barrier(dist)  # the others wait for rank 0's validation
 
         if last_saved != progress.step:
             save_checkpoint("final")
@@ -467,6 +524,11 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
             mlflow_run_id=tracker.run_id,
             upload_failures=manager.upload_failures,
         )
+
+        if not main:
+            # Evaluation, registration and the summary are rank 0's.
+            tracker.end("FINISHED")
+            return summary
 
         # -- final evaluation: fine-tuned vs pretrained baseline ------------------
         if eval_parsed:
@@ -509,6 +571,8 @@ def train(config: TrainingConfig, *, s3_client=None, tracker=None) -> RunSummary
         # open as FAILED so a resume reopens it and the UI shows the gap.
         tracker.end("FAILED")
         raise
+    finally:
+        distributed.shutdown(dist)
 
 
 def _write_summary(manager: CheckpointManager, summary: RunSummary) -> None:

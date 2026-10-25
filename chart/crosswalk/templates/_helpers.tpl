@@ -1,7 +1,10 @@
 {{/* Image for the current GPU setting. */}}
 {{- define "crosswalk.image" -}}
+{{- if not (has .Values.gpu.vendor (list "amd" "nvidia")) -}}
+{{- fail "gpu.vendor must be amd or nvidia" -}}
+{{- end -}}
 {{- $img := ternary .Values.image.gpu .Values.image.cpu .Values.gpu.enabled -}}
-{{- if and .Values.gpu.enabled (eq $img.tag "rocm-unset") -}}
+{{- if and .Values.gpu.enabled (has $img.tag (list "rocm-unset" "cuda-unset")) -}}
 {{- fail "gpu.enabled=true needs image.gpu.tag: build it with scripts/build-rocm-image.sh and set the tag it prints" -}}
 {{- end -}}
 image: "{{ $img.repository }}:{{ $img.tag }}"
@@ -46,7 +49,7 @@ securityContext:
   runAsUser: 10001
   runAsGroup: 10001
   fsGroup: 10001
-  {{- if .Values.gpu.enabled }}
+  {{- if and .Values.gpu.enabled (eq .Values.gpu.vendor "amd") }}
   supplementalGroups:
     - {{ .Values.gpu.videoGid }}
     - {{ .Values.gpu.renderGid }}
@@ -81,7 +84,7 @@ securityContext:
 {{- $profile := ternary .resources.gpu .resources.cpu .root.Values.gpu.enabled -}}
 {{- $limits := deepCopy ($profile.limits | default dict) -}}
 {{- if .root.Values.gpu.enabled -}}
-{{- $_ := set $limits .root.Values.gpu.resource 1 -}}
+{{- $_ := set $limits .root.Values.gpu.resource (int (.gpus | default 1)) -}}
 {{- end -}}
 resources:
   requests:
@@ -116,7 +119,7 @@ resources:
       fieldPath: spec.nodeName
 - name: HOME
   value: /tmp
-{{- if and .Values.gpu.enabled .Values.gpu.hsaOverrideGfxVersion }}
+{{- if and .Values.gpu.enabled (eq .Values.gpu.vendor "amd") .Values.gpu.hsaOverrideGfxVersion }}
 - name: HSA_OVERRIDE_GFX_VERSION
   value: {{ .Values.gpu.hsaOverrideGfxVersion | quote }}
 {{- end }}

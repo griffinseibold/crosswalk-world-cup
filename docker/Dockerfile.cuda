@@ -1,0 +1,47 @@
+# NVIDIA (CUDA) image: the same application as the ROCm and CPU images, on
+# the official PyTorch CUDA runtime image. The code is vendor-agnostic
+# (src/crosswalk/device.py); only this file and the chart's gpu.resource
+# change for NVIDIA.
+#
+# Base: PyTorch 2.9.1 with CUDA 12.8 (2.9's stable CUDA, per PyTorch's
+# RELEASE.md compatibility matrix) and cuDNN 9, tag scheme from PyTorch's
+# docker-release workflow: <version>-cuda<short>-cudnn<major>-runtime. The
+# same torch 2.9.x the ROCm image runs, so benchmark differences are the
+# hardware and vendor stack, not the framework. Pin by digest once pulled:
+#   docker inspect --format '{{index .RepoDigests 0}}' pytorch/pytorch:<tag>
+#
+#   docker build -f docker/Dockerfile.cuda -t crosswalk-world-cup:cuda-<commit> .
+ARG BASE=pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
+FROM ${BASE}
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    TORCH_HOME=/cache/torch \
+    MPLCONFIGDIR=/tmp
+
+WORKDIR /app
+
+RUN groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /app app
+
+# Non-torch dependencies only; constraints-cuda.txt stops pip from replacing
+# the base image's CUDA build of torch/torchvision while resolving them.
+COPY requirements/ requirements/
+RUN pip install --requirement requirements/cuda.txt \
+    && python -c "import torch, torchvision; assert torch.version.cuda, 'not a CUDA torch'; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'torchvision', torchvision.__version__)"
+
+COPY pyproject.toml README.md ./
+COPY src/ src/
+RUN pip install --no-deps .
+
+ARG GIT_COMMIT=unknown
+ARG IMAGE=crosswalk-world-cup:cuda
+ENV CROSSWALK_GIT_COMMIT=${GIT_COMMIT} \
+    CROSSWALK_IMAGE=${IMAGE}
+
+USER 10001:10001
+EXPOSE 8080
+ENTRYPOINT ["crosswalk"]
+CMD ["--help"]

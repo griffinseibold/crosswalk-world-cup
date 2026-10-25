@@ -367,3 +367,52 @@ def test_alert_rules_cover_the_pipeline_and_query_real_metrics():
     assert [r["alert"] for g in rule["spec"]["groups"] for r in g["rules"]] == [
         "CrosswalkInferenceLatencyHigh"
     ]
+
+
+def test_nvidia_values_switch_the_gpu_resource_and_drop_amd_settings():
+    values = str(CHART / "values-nvidia.yaml")
+    [dep] = [
+        d
+        for d in render("--values", values, "--set", "image.gpu.tag=cuda-abc")
+        if d["kind"] == "Deployment"
+    ]
+    spec = pod_spec(dep)
+    limits = spec["containers"][0]["resources"]["limits"]
+    assert limits["nvidia.com/gpu"] == 1 and "amd.com/gpu" not in limits
+    assert "supplementalGroups" not in spec["securityContext"]
+    assert spec["containers"][0]["image"] == "crosswalk-world-cup:cuda-abc"
+    env = {e["name"] for e in spec["containers"][0]["env"]}
+    assert "HSA_OVERRIDE_GFX_VERSION" not in env
+    result = subprocess.run(
+        [helm, "template", "crosswalk", str(CHART), "--values", values],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0  # no image tag set yet
+
+
+def test_multi_gpu_train_job_runs_torchrun_and_requests_every_gpu(tmp_path):
+    config = repo_root() / "configs" / "train-bdd100k.yaml"
+    common = (
+        "--show-only", "templates/job.yaml", "--set", "job.enabled=true",
+        "--set-string", "job.name=crosswalk-ddp", "--set", "gpu.enabled=true",
+        "--set-string", "image.gpu.tag=cuda-abc", "--set-file", f"job.config={config}",
+    )  # fmt: skip
+    [job] = render(*common, "--set-string", "job.kind=train", "--set", "job.gpus=4",
+                   "--values", str(CHART / "values-nvidia.yaml"))  # fmt: skip
+    main = pod_spec(job)["containers"][0]
+    assert main["command"] == ["torchrun"]
+    assert main["args"][:4] == ["--standalone", "--nproc-per-node=4", "-m", "crosswalk"]
+    assert main["args"][4:] == ["train", "--config", "/config/config.yaml"]
+    assert main["resources"]["limits"]["nvidia.com/gpu"] == 4
+    # One GPU (the default) is the unchanged single-process path.
+    [single] = render(*common, "--set-string", "job.kind=train")
+    assert "command" not in pod_spec(single)["containers"][0]
+    assert pod_spec(single)["containers"][0]["resources"]["limits"]["amd.com/gpu"] == 1
+    # DDP is for training only.
+    bad = subprocess.run(
+        [helm, "template", "crosswalk", str(CHART), *common, "--set-string", "job.kind=benchmark",
+         "--set", "job.gpus=2"],
+        capture_output=True, text=True,
+    )  # fmt: skip
+    assert bad.returncode != 0 and "job.gpus" in bad.stderr

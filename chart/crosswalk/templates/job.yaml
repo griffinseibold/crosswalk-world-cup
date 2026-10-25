@@ -2,6 +2,10 @@
 {{- if not (has .Values.job.kind (list "validate" "train" "benchmark" "promote")) }}
 {{- fail "job.kind must be validate, train, benchmark or promote" }}
 {{- end }}
+{{- $gpus := int (.Values.job.gpus | default 1) }}
+{{- if and (gt $gpus 1) (or (ne .Values.job.kind "train") (not .Values.gpu.enabled)) }}
+{{- fail "job.gpus > 1 (DistributedDataParallel) is for train Jobs with gpu.enabled=true" }}
+{{- end }}
 {{- if and (ne .Values.job.kind "validate") (not .Values.job.config) }}
 {{- fail "job.config is required for train and benchmark (--set-file job.config=configs/...)" }}
 {{- end }}
@@ -67,7 +71,18 @@ spec:
       containers:
         - name: {{ .Values.job.kind }}
           {{- include "crosswalk.image" . | nindent 10 }}
+          {{- if gt $gpus 1 }}
+          # One process per GPU, gradients averaged by DDP (NCCL; RCCL on
+          # ROCm). --standalone: a single-node rendezvous, nothing to expose.
+          command: ["torchrun"]
+          {{- end }}
           args:
+            {{- if gt $gpus 1 }}
+            - --standalone
+            - --nproc-per-node={{ $gpus }}
+            - -m
+            - crosswalk
+            {{- end }}
             {{- if eq .Values.job.kind "validate" }}
             - validate
             - --device
@@ -112,7 +127,7 @@ spec:
             - name: {{ .name }}
               value: {{ .value | quote }}
             {{- end }}
-          {{- include "crosswalk.resources" (dict "root" . "resources" .Values.job.resources) | nindent 10 }}
+          {{- include "crosswalk.resources" (dict "root" . "resources" .Values.job.resources "gpus" $gpus) | nindent 10 }}
           {{- include "crosswalk.containerSecurity" . | nindent 10 }}
           volumeMounts:
             - {name: config, mountPath: /config, readOnly: true}
