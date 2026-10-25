@@ -92,13 +92,15 @@ class DetectionWriter:
         with self._lock:
             if name not in self._handles:
                 path = self.out_dir / f"{name}.jsonl.partial"
-                self._handles[name] = open(path, "w", encoding="utf-8")
+                # Kept open across many writes and closed in close(); a with
+                # block cannot span calls.
+                self._handles[name] = open(path, "w", encoding="utf-8")  # noqa: SIM115
 
     def write(self, name: str, record: dict[str, Any]) -> None:
         with self._lock:
             handle = self._handles.get(name)
             if handle is None:
-                handle = self._handles[name] = open(
+                handle = self._handles[name] = open(  # noqa: SIM115 (closed in close())
                     self.out_dir / f"{name}.jsonl.partial", "w", encoding="utf-8"
                 )
             handle.write(json.dumps(record, separators=(",", ":")) + "\n")
