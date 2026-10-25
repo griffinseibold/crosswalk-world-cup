@@ -190,3 +190,19 @@ def test_make_manager_falls_back_when_bucket_missing(tmp_path, s3_client):
         "run-c", "s3://checkpoints/run-c", str(tmp_path), 3, s3_client=s3_client
     )
     assert manager.remote is not None and "s3://checkpoints/run-c" in desc
+
+
+def test_sync_prefix_downloads_once(tmp_path, s3_client):
+    for key, body in (
+        ("bdd/labels/det.json", b"[]"),
+        ("bdd/images/a.jpg", b"jpeg"),
+        ("other/x", b"no"),
+        ("bdd/empty-dir/", b""),
+    ):
+        s3_client.put_object(Bucket="datasets", Key=key, Body=body)
+    first = storage.sync_prefix("s3://datasets/bdd", str(tmp_path / "d"), client=s3_client)
+    assert first == {"downloaded": 2, "skipped": 0, "bytes": 6}
+    assert (tmp_path / "d/images/a.jpg").read_bytes() == b"jpeg"
+    assert not (tmp_path / "d/x").exists()
+    second = storage.sync_prefix("s3://datasets/bdd/", str(tmp_path / "d"), client=s3_client)
+    assert second == {"downloaded": 0, "skipped": 2, "bytes": 0}

@@ -8,6 +8,7 @@
     crosswalk evaluate --config train.yaml [--checkpoint s3://...]
     crosswalk make-synthetic out/          tiny dataset for smoke tests
     crosswalk hash-dataset --config train.yaml
+    crosswalk sync s3://datasets/bdd100k=/scratch/data/bdd100k
 
 ``--set a.b=value`` overrides any config key (parsed as YAML), so a Job can
 reuse one ConfigMap'd file with per-run changes.
@@ -153,6 +154,18 @@ def cmd_hash_dataset(args) -> int:
     return 0
 
 
+def cmd_sync(args) -> int:
+    from crosswalk.storage import sync_prefix
+
+    for pair in args.pairs:
+        source, _, dest = pair.partition("=")
+        if not source.startswith("s3://") or not dest:
+            raise SystemExit(f"expected s3://bucket/prefix=/local/dir, got {pair!r}")
+        counts = sync_prefix(source, dest)
+        print(f"{source} -> {dest}: {counts}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="crosswalk", description=__doc__.split("\n\n")[0])
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -201,6 +214,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--video", action="store_true", help="also write a short test clip")
     p.add_argument("--video-frames", type=int, default=60)
     p.set_defaults(func=cmd_make_synthetic)
+
+    p = sub.add_parser("sync", help="download s3:// prefixes to local directories")
+    p.add_argument("pairs", nargs="+", metavar="s3://bucket/prefix=/local/dir")
+    p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser(
         "hash-dataset", help="print the dataset manifests a training run would record"
