@@ -12,7 +12,17 @@ metadata:
   labels:
     {{- include "crosswalk.labels" . | nindent 4 }}
     app.kubernetes.io/component: {{ .Values.job.kind }}
+    {{- if .Values.kueue.enabled }}
+    # Kueue admits the Job when the gpu ClusterQueue has room.
+    kueue.x-k8s.io/queue-name: {{ .Values.kueue.localQueue }}
+    {{- end }}
 spec:
+  {{- if .Values.kueue.enabled }}
+  # Created suspended: Kueue unsuspends it on admission. (Kueue's webhook
+  # would suspend it anyway; saying so here means no pod can start in the
+  # moment before the webhook acts, and the intent is visible in the YAML.)
+  suspend: true
+  {{- end }}
   # A killed or evicted training pod is replaced and resumes from its newest
   # checkpoint; after backoffLimit failures the Job gives up.
   {{- if eq .Values.job.kind "promote" }}

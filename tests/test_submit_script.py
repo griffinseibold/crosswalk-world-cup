@@ -88,3 +88,10 @@ def test_kubectl_context(submit):
     ]
     args = submit.build_parser().parse_args(["validate"])
     assert submit.kubectl(args, "get")[:3] == ["kubectl", "--context", "kind-homelab-dev"]
+
+
+def test_no_kueue_flag(submit):
+    args = submit.build_parser().parse_args(["validate", "--no-kueue"])
+    assert "kueue.enabled=false" in " ".join(submit.helm_command(args, "v", None, []))
+    args = submit.build_parser().parse_args(["validate"])
+    assert "kueue.enabled" not in " ".join(submit.helm_command(args, "v", None, []))

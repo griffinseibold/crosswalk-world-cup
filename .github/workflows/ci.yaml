@@ -67,6 +67,7 @@ jobs:
       - run: helm lint chart/crosswalk
       - run: helm lint chart/crosswalk --set gpu.enabled=true --set image.gpu.tag=rocm-ci
       - run: helm lint chart/crosswalk --set pipeline.enabled=true --set httpRoute.lan.enabled=true
+      - run: helm lint chart/crosswalk --set kueue.enabled=false
       - run: helm template crosswalk chart/crosswalk --namespace crosswalk >/dev/null
       - run: >
           helm template crosswalk chart/crosswalk --namespace crosswalk

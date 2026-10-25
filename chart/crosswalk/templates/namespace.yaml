@@ -8,6 +8,9 @@ metadata:
     {{- with .Values.namespace.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+    {{- if .Values.kueue.enabled }}
+    {{- toYaml .Values.kueue.namespaceLabels | nindent 4 }}
+    {{- end }}
     {{- if and .Values.httpRoute.enabled .Values.httpRoute.lan.enabled }}
     gateway.homelab/lan: "true"
     {{- end }}

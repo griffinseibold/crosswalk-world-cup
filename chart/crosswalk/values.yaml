@@ -78,6 +78,20 @@ httpRoute:
     hostname: crosswalk.lab.internal
     sectionName: lan
 
+# Kueue: batch Jobs (validate, train, benchmark, promote) wait in a queue for
+# the GPU instead of piling up Pending. The homelab provides ClusterQueue
+# `gpu` (ResourceFlavor amd-gpu, amd.com/gpu: 1) and manages only namespaces
+# labelled kueue.homelab/queues: "true". This chart adds that namespace
+# label and a LocalQueue pointing at the ClusterQueue; Jobs carry
+# kueue.x-k8s.io/queue-name and are created suspended. Set false on a
+# cluster without Kueue (the label and LocalQueue are then not rendered).
+kueue:
+  enabled: true
+  localQueue: crosswalk
+  clusterQueue: gpu
+  namespaceLabels:
+    kueue.homelab/queues: "true"
+
 # Kafka (homelab: PLAINTEXT, auto-creation off; every component creates the
 # topics it uses at startup, replication factor 1).
 kafka:

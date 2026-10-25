@@ -25,6 +25,9 @@ spec:
     server: https://kubernetes.default.svc
     namespace: crosswalk
   syncPolicy:
+    # The chart renders the Namespace with its labels (Gateway access and
+    # kueue.homelab/queues). If CreateNamespace is ever used instead, set the
+    # same labels with managedNamespaceMetadata.
     automated:
       prune: true
       selfHeal: true

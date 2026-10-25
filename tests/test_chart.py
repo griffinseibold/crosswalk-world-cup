@@ -51,6 +51,7 @@ def test_default_render_follows_the_homelab_contract():
             "ConfigMap",
             "ConfigMap",
             "Deployment",
+            "LocalQueue",
             "PersistentVolumeClaim",
             "Service",
             "ServiceMonitor",
@@ -317,3 +318,30 @@ def test_promote_job_never_retries_a_rejection():
         "--config",
         "/config/config.yaml",
     ]
+
+
+def test_kueue_queue_and_jobs_by_default():
+    docs = render()
+    [queue] = by_kind(docs, "LocalQueue")
+    assert queue["apiVersion"] == "kueue.x-k8s.io/v1beta2"
+    assert queue["metadata"]["name"] == "crosswalk" and queue["spec"]["clusterQueue"] == "gpu"
+    [ns] = by_kind(docs, "Namespace")
+    assert ns["metadata"]["labels"]["kueue.homelab/queues"] == "true"
+    [job] = render(
+        "--show-only", "templates/job.yaml", "--set", "job.enabled=true", "--set-string", "job.name=crosswalk-validate-1",
+    )  # fmt: skip
+    assert job["metadata"]["labels"]["kueue.x-k8s.io/queue-name"] == "crosswalk"
+    assert job["spec"]["suspend"] is True
+
+
+def test_kueue_can_be_turned_off_for_plain_clusters():
+    docs = render("--set", "kueue.enabled=false")
+    assert not by_kind(docs, "LocalQueue")
+    [ns] = by_kind(docs, "Namespace")
+    assert "kueue.homelab/queues" not in ns["metadata"]["labels"]
+    [job] = render(
+        "--show-only", "templates/job.yaml", "--set", "job.enabled=true", "--set-string", "job.name=x",
+        "--set", "kueue.enabled=false",
+    )  # fmt: skip
+    assert "kueue.x-k8s.io/queue-name" not in job["metadata"]["labels"]
+    assert "suspend" not in job["spec"]

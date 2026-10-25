@@ -26,6 +26,11 @@ Examples:
     scripts/submit-training.py train --config configs/train-bdd100k.yaml --dry-run   # print the manifest
     scripts/submit-training.py promote --config configs/train-bdd100k.yaml --image-tag rocm-abc1234
 
+Kueue: with the chart's kueue.enabled (the homelab default) every Job is
+created suspended with kueue.x-k8s.io/queue-name: crosswalk and waits for
+the gpu ClusterQueue to admit it. --no-kueue submits a plain Job (for a
+cluster without Kueue). `kubectl get workloads -n crosswalk` shows the queue.
+
 Data: training configs read datasets from /scratch/data/<name>/...; by
 convention each <name> is synced from s3://datasets/<name>/ by an init
 container before training (override with --sync, skip with --no-sync).
@@ -136,6 +141,8 @@ def helm_command(args, name: str, config_file: Path | None, sync: list[str]) -> 
             "--set-string",
             f"job.env[{i}].value={value}",
         ]
+    if getattr(args, "no_kueue", False):
+        cmd += ["--set", "kueue.enabled=false"]
     for value_file in args.values:
         cmd += ["--values", value_file]
     for raw in args.helm_set:
@@ -193,6 +200,12 @@ def submit(args) -> int:
         check=True,
     )
     print(f"\nsubmitted job/{name}. Follow it with:")
+    if not args.no_kueue:
+        print(
+            "  "
+            + shlex.join(kubectl(args, "get", "workloads", "-w"))
+            + "   # Kueue: queued -> admitted"
+        )
     print("  " + shlex.join(kubectl(args, "logs", "-f", f"job/{name}")))
     print("  " + shlex.join(kubectl(args, "get", "pods", "-l", f"job-name={name}", "-w")))
     if not args.cpu:
@@ -239,6 +252,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="NAME=VALUE",
         help="extra environment for the Job, e.g. CROSSWALK_FAULT_AT_STEP=500",
+    )
+    parser.add_argument(
+        "--no-kueue", action="store_true", help="plain Job, not queued (cluster without Kueue)"
     )
     parser.add_argument("--values", action="append", default=[], help="extra Helm values file")
     parser.add_argument("--helm-set", action="append", default=[], help="extra raw Helm --set")

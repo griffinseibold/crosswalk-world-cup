@@ -1,0 +1,11 @@
+{{- if and .Values.kueue.enabled (not .Values.job.enabled) }}
+# This namespace's queue for batch Jobs, backed by the homelab's ClusterQueue.
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: LocalQueue
+metadata:
+  name: {{ .Values.kueue.localQueue }}
+  labels:
+    {{- include "crosswalk.labels" . | nindent 4 }}
+spec:
+  clusterQueue: {{ .Values.kueue.clusterQueue }}
+{{- end }}
