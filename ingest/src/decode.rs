@@ -184,15 +184,23 @@ pub struct Decoder {
 }
 
 impl Decoder {
+    /// Start FFmpeg on `path`. `info` comes from [`probe`]; frames come out
+    /// at `resize` if given, else at the probed size.
     pub async fn start(
         ffmpeg: &str,
         path: &Path,
-        width: u32,
-        height: u32,
+        info: &ProbeInfo,
         resize: Option<(u32, u32)>,
         realtime: bool,
     ) -> Result<Self> {
-        let (width, height) = resize.unwrap_or((width, height));
+        let (width, height) = resize.unwrap_or((info.width, info.height));
+        let fps = info.fps;
+        // Used only if a frame's timestamp never arrives (see below).
+        let fallback_fps = if fps.is_finite() && fps > 0.0 {
+            fps
+        } else {
+            30.0
+        };
         let mut child = Command::new(ffmpeg)
             .args(ffmpeg_args(path, resize, realtime))
             .stdin(Stdio::null())
@@ -249,11 +257,19 @@ impl Decoder {
                 }
                 // The showinfo line for a frame is printed before the frame
                 // is written, but over a different pipe; wait briefly for it.
-                let pts = match tokio::time::timeout(Duration::from_secs(5), pts_rx.recv()).await {
+                // 30 s is generous: the line is written before the frame, and only a
+                // stalled stderr reader could delay it.
+                let pts = match tokio::time::timeout(Duration::from_secs(30), pts_rx.recv()).await {
                     Ok(Some(p)) if p.is_finite() => p,
-                    // Missing or NOPTS: fall back to the frame index so time
-                    // still increases; the sampler only needs monotonic time.
-                    _ => index as f64 / 30.0,
+                    // Missing or NOPTS: fall back to the frame index at the
+                    // probed rate, so time still increases at the right pace.
+                    _ => {
+                        tracing::warn!(
+                            frame = index,
+                            "no timestamp from ffmpeg; using index / fps"
+                        );
+                        index as f64 / fallback_fps
+                    }
                 };
                 let frame = RawFrame {
                     index,
@@ -405,16 +421,9 @@ mod tests {
         let info = probe("ffprobe", &clip).await.unwrap();
         assert_eq!((info.width, info.height), (160, 96));
         assert!((info.fps - 25.0).abs() < 1e-6);
-        let mut decoder = Decoder::start(
-            "ffmpeg",
-            &clip,
-            info.width,
-            info.height,
-            Some((80, 48)),
-            false,
-        )
-        .await
-        .unwrap();
+        let mut decoder = Decoder::start("ffmpeg", &clip, &info, Some((80, 48)), false)
+            .await
+            .unwrap();
         let mut frames = Vec::new();
         while let Some(frame) = decoder.frames.recv().await {
             frames.push(frame.unwrap());
@@ -441,9 +450,19 @@ mod tests {
         let bad = dir.join("not-a-video.mp4");
         std::fs::write(&bad, b"definitely not a video").unwrap();
         assert!(probe("ffprobe", &bad).await.is_err());
-        let mut decoder = Decoder::start("ffmpeg", &bad, 16, 16, None, false)
-            .await
-            .unwrap();
+        let mut decoder = Decoder::start(
+            "ffmpeg",
+            &bad,
+            &ProbeInfo {
+                width: 16,
+                height: 16,
+                fps: 0.0,
+            },
+            None,
+            false,
+        )
+        .await
+        .unwrap();
         let first = decoder.frames.recv().await.expect("an error is reported");
         let err = first.expect_err("decoding garbage fails");
         assert!(err.to_string().contains("no frames"), "{err}");

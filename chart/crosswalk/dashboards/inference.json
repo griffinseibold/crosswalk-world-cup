@@ -1,9 +1,9 @@
 {
   "uid": "crosswalk-inference",
-  "title": "Crosswalk inference",
+  "title": "Crosswalk inference and pipeline",
   "description": "Crosswalk World Cup inference service. Gaps while the service is scaled to zero or waiting for the GPU are normal. Throughput claims need a recorded Experiment A run, not this dashboard.",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": false,
   "tags": [
     "crosswalk",
@@ -497,7 +497,7 @@
         {
           "refId": "A",
           "expr": "sum by (le) (increase(crosswalk_batch_size_bucket{namespace=\"crosswalk\"}[15m]))",
-          "legendFormat": "≤ {{le}}",
+          "legendFormat": "\u2264 {{le}}",
           "format": "heatmap"
         }
       ],
@@ -755,6 +755,411 @@
       "options": {
         "showHeader": true
       }
+    },
+    {
+      "id": 16,
+      "type": "row",
+      "title": "Streaming pipeline (Milestone 3)",
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 17,
+      "title": "Stages up",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 45,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (stage) (crosswalk_stage_up{namespace=\"crosswalk\"})",
+          "legendFormat": "{{stage}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "description": "1 per running consume loop, per stage."
+    },
+    {
+      "id": 18,
+      "title": "Dead letters (1h)",
+      "type": "stat",
+      "gridPos": {
+        "x": 6,
+        "y": 45,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(crosswalk_stage_dead_letters_total{namespace=\"crosswalk\"}[1h])) or vector(0)",
+          "legendFormat": "",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "description": "Events a stage gave up on and wrote to crosswalk.<stage>.dlq. Should be 0."
+    },
+    {
+      "id": 19,
+      "title": "Frames published per second",
+      "type": "stat",
+      "gridPos": {
+        "x": 12,
+        "y": 45,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(crosswalk_ingest_frames_published_total{namespace=\"crosswalk\"}[1m]))",
+          "legendFormat": "",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "description": "Frame events Kafka acknowledged from the Rust sampler."
+    },
+    {
+      "id": 20,
+      "title": "Newest ranking window",
+      "type": "stat",
+      "gridPos": {
+        "x": 18,
+        "y": 45,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - max(crosswalk_ranking_last_update_timestamp_seconds{namespace=\"crosswalk\"})",
+          "legendFormat": "",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "description": "Seconds since the ranking service stored an indicator window."
+    },
+    {
+      "id": 21,
+      "title": "Consumer lag by stage",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 49,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (stage) (crosswalk_stage_consumer_lag{namespace=\"crosswalk\"})",
+          "legendFormat": "{{stage}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "description": "Records in each stage's input topic not yet committed. Steady growth means the stage cannot keep up."
+    },
+    {
+      "id": 22,
+      "title": "End-to-end latency (frame decode to stage output)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 49,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le, stage) (rate(crosswalk_stage_event_age_seconds_bucket{namespace=\"crosswalk\"}[5m])))",
+          "legendFormat": "p50 {{stage}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le, stage) (rate(crosswalk_stage_event_age_seconds_bucket{namespace=\"crosswalk\"}[5m])))",
+          "legendFormat": "p95 {{stage}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "description": "Now minus the source frame's decode time when each stage finishes an event. The indicators line is the full pipeline latency (windows add up to window_s on top)."
+    },
+    {
+      "id": 23,
+      "title": "Stage batch time p95",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 57,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, stage) (rate(crosswalk_stage_batch_seconds_bucket{namespace=\"crosswalk\"}[5m])))",
+          "legendFormat": "{{stage}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "description": "Time to process one polled batch per stage."
+    },
+    {
+      "id": 24,
+      "title": "Events by outcome",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 57,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (stage, outcome) (rate(crosswalk_stage_events_total{namespace=\"crosswalk\"}[5m]))",
+          "legendFormat": "{{stage}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "description": "processed, duplicate (redelivery), dead_lettered, invalid, transient_retry (dependency down), late (tracking)."
+    },
+    {
+      "id": 25,
+      "title": "Sampler: decoded, sampled, published, dropped",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 65,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(crosswalk_ingest_frames_decoded_total{namespace=\"crosswalk\"}[1m]))",
+          "legendFormat": "decoded"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(crosswalk_ingest_frames_sampled_total{namespace=\"crosswalk\"}[1m]))",
+          "legendFormat": "sampled"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(crosswalk_ingest_frames_published_total{namespace=\"crosswalk\"}[1m]))",
+          "legendFormat": "published"
+        },
+        {
+          "refId": "D",
+          "expr": "sum by (reason) (rate(crosswalk_ingest_frames_dropped_total{namespace=\"crosswalk\"}[1m]))",
+          "legendFormat": "dropped {{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "description": ""
+    },
+    {
+      "id": 26,
+      "title": "Sampler backpressure and buffer",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 65,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(crosswalk_ingest_backpressure_seconds_total{namespace=\"crosswalk\"}[1m]))",
+          "legendFormat": "blocked fraction"
+        },
+        {
+          "refId": "B",
+          "expr": "max(crosswalk_ingest_buffer_depth{namespace=\"crosswalk\"}) / max(crosswalk_ingest_buffer_capacity{namespace=\"crosswalk\"})",
+          "legendFormat": "buffer fill"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "description": "Fraction of time the decoder was blocked waiting for room (block policy), and how full the buffer is."
+    },
+    {
+      "id": 27,
+      "title": "Sampler stage latency p95",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 73,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(crosswalk_ingest_encode_seconds_bucket{namespace=\"crosswalk\"}[5m])))",
+          "legendFormat": "JPEG encode"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(crosswalk_ingest_upload_seconds_bucket{namespace=\"crosswalk\"}[5m])))",
+          "legendFormat": "S3 upload"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(crosswalk_ingest_publish_seconds_bucket{namespace=\"crosswalk\"}[5m])))",
+          "legendFormat": "Kafka publish"
+        },
+        {
+          "refId": "D",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(crosswalk_ingest_frame_age_seconds_bucket{namespace=\"crosswalk\"}[5m])))",
+          "legendFormat": "decode to ack"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "description": ""
+    },
+    {
+      "id": 28,
+      "title": "Ranked crossings",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 73,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (space) (crosswalk_ranking_crossings{namespace=\"crosswalk\"})",
+          "legendFormat": "{{space}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "description": "Crossings with enough data to be ranked, per table."
     }
   ]
 }

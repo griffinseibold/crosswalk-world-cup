@@ -6,4 +6,8 @@ metadata:
     {{- include "crosswalk.labels" . | nindent 4 }}
 data:
   inference.yaml: |
-    {{- toYaml .Values.inference.config | nindent 4 }}
+    {{- $config := deepCopy .Values.inference.config }}
+    {{- if .Values.pipeline.enabled }}
+    {{- $_ := set $config "mode" "kafka" }}
+    {{- end }}
+    {{- toYaml $config | nindent 4 }}

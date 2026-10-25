@@ -1,0 +1,33 @@
+{{- if .Values.pipeline.enabled }}
+# configs/stages.yaml for the tracking, indicators and ranking Deployments,
+# plus one key per camera config (mounted as a directory).
+{{- $stages := deepCopy .Values.pipeline.stages }}
+{{- $_ := set $stages.indicators "cameras_dir" "/config/cameras" }}
+{{- $_ := set $stages.ranking "cameras_dir" "/config/cameras" }}
+{{- $_ := set $stages.ranking "database" "/data/ranking.sqlite3" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Chart.Name }}-stages
+  labels:
+    {{- include "crosswalk.labels" . | nindent 4 }}
+data:
+  stages.yaml: |
+    {{- toYaml $stages | nindent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Chart.Name }}-cameras
+  labels:
+    {{- include "crosswalk.labels" . | nindent 4 }}
+data:
+  {{- range $path, $_ := .Files.Glob "files/cameras/*.yaml" }}
+  {{ base $path }}: |
+    {{- $.Files.Get $path | nindent 4 }}
+  {{- end }}
+  {{- range $name, $text := .Values.pipeline.cameras }}
+  {{ $name }}.yaml: |
+    {{- $text | nindent 4 }}
+  {{- end }}
+{{- end }}

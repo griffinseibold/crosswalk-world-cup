@@ -8,6 +8,25 @@ image: "{{ $img.repository }}:{{ $img.tag }}"
 imagePullPolicy: {{ $img.pullPolicy }}
 {{- end -}}
 
+{{/* The CPU image, whatever gpu.enabled says: the streaming stages after
+inference never need a GPU. */}}
+{{- define "crosswalk.cpuImage" -}}
+image: "{{ .Values.image.cpu.repository }}:{{ .Values.image.cpu.tag }}"
+imagePullPolicy: {{ .Values.image.cpu.pullPolicy }}
+{{- end -}}
+
+{{/* Pod security for CPU-only pods: as crosswalk.podSecurity, without the
+GPU groups and node placement. */}}
+{{- define "crosswalk.cpuPodSecurity" -}}
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+{{- end -}}
+
 {{/* Common labels. */}}
 {{- define "crosswalk.labels" -}}
 app.kubernetes.io/name: {{ .Chart.Name }}
@@ -89,6 +108,8 @@ resources:
       key: AWS_SECRET_ACCESS_KEY
 - name: MLFLOW_TRACKING_URI
   value: {{ .Values.mlflow.trackingUri | quote }}
+- name: KAFKA_BOOTSTRAP_SERVERS
+  value: {{ .Values.kafka.bootstrapServers | quote }}
 - name: NODE_NAME
   valueFrom:
     fieldRef:

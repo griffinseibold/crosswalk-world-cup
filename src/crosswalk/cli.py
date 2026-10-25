@@ -10,6 +10,7 @@
     crosswalk hash-dataset --config train.yaml
     crosswalk sync s3://datasets/bdd100k=/scratch/data/bdd100k
     crosswalk stage tracking --config stages.yaml   a streaming stage (Deployment)
+    crosswalk demo out/ [--serve]          whole pipeline locally, no Kafka/S3/GPU
 
 ``--set a.b=value`` overrides any config key (parsed as YAML), so a Job can
 reuse one ConfigMap'd file with per-run changes.
@@ -167,6 +168,33 @@ def cmd_sync(args) -> int:
     return 0
 
 
+def cmd_demo(args) -> int:
+    from crosswalk import demo
+
+    result = demo.run(
+        args.output, seconds=args.seconds, fps=args.fps, window_s=args.window,
+        video=args.video, ingest_bin=args.ingest_bin,
+    )  # fmt: skip
+    print(
+        json.dumps(
+            {"counts": result.counts, "topics": result.topics, "seconds": round(result.seconds, 1)},
+            indent=2,
+        )
+    )
+    for space, table in result.leaderboard["tables"].items():
+        for e in table:
+            rate = e["rates_per_100_ped_minutes"]["close_approaches"]
+            print(
+                f"{space:6} #{e['rank']} {e['crossing']}: {rate['rate']} per 100 ped-min (95% {rate['lower']}-{rate['upper']})"
+            )
+    for e in result.leaderboard["not_ranked"]:
+        print(f"not ranked: {e['crossing']} ({'; '.join(e['not_ranked_because'])})")
+    print(f"\nwrote {result.out_dir}/leaderboard.json and index.html")
+    if args.serve is not None:
+        demo.serve(result.out_dir, args.serve)
+    return 0
+
+
 def cmd_stage(args) -> int:
     from crosswalk.stages import run_stage
 
@@ -227,6 +255,24 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("sync", help="download s3:// prefixes to local directories")
     p.add_argument("pairs", nargs="+", metavar="s3://bucket/prefix=/local/dir")
     p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser("demo", help="run the whole streaming pipeline locally on generated footage")
+    p.add_argument("output", nargs="?", default="demo-out")
+    p.add_argument(
+        "--seconds", type=float, default=120.0, help="seconds of generated video per crossing"
+    )
+    p.add_argument("--fps", type=float, default=5.0, help="sampling rate")
+    p.add_argument("--window", type=float, default=15.0, help="indicator window, seconds")
+    p.add_argument(
+        "--video", action="store_true", help="encode a real clip and decode it with PyAV"
+    )
+    p.add_argument(
+        "--ingest-bin", help="path to the Rust crosswalk-ingest binary (decodes with FFmpeg)"
+    )
+    p.add_argument(
+        "--serve", type=int, nargs="?", const=8000, help="then serve the page on this port"
+    )
+    p.set_defaults(func=cmd_demo)
 
     p = sub.add_parser("stage", help="run a streaming stage (tracking, indicators, ranking)")
     p.add_argument("name", choices=["tracking", "indicators", "ranking"])

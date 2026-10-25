@@ -300,15 +300,9 @@ async fn play<S: FrameStore, K: EventSink>(
                 }
             };
             tracing::info!(clip = %clip.file_name, camera = %clip.camera_id, width = info.width, height = info.height, fps = info.fps, pass, "playing");
-            let decoder = decode::Decoder::start(
-                &args.ffmpeg,
-                path,
-                info.width,
-                info.height,
-                args.resize,
-                args.realtime,
-            )
-            .await?;
+            let decoder =
+                decode::Decoder::start(&args.ffmpeg, path, &info, args.resize, args.realtime)
+                    .await?;
             let (frames, process) = decoder.split();
             let report =
                 pipeline::run_pass(&clip, pass, frames, settings, outputs, shutdown.clone()).await;

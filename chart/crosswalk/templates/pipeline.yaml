@@ -1,0 +1,209 @@
+{{- if .Values.pipeline.enabled }}
+{{- $root := . }}
+{{- $p := .Values.pipeline }}
+# -- ingest: the Rust frame sampler ---------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}-ingest
+  labels:
+    {{- include "crosswalk.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ingest
+spec:
+  replicas: {{ $p.ingest.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/component: ingest
+  template:
+    metadata:
+      labels:
+        {{- include "crosswalk.labels" . | nindent 8 }}
+        app.kubernetes.io/component: ingest
+    spec:
+      {{- include "crosswalk.cpuPodSecurity" . | nindent 6 }}
+      # The sampler drains queued frames for up to 20 s after SIGTERM.
+      terminationGracePeriodSeconds: 30
+      initContainers:
+        # Recorded footage only: clips are copied from S3 before playing.
+        - name: footage
+          {{- include "crosswalk.cpuImage" . | nindent 10 }}
+          args: ["sync", {{ printf "%s=/footage" $p.ingest.footage | quote }}]
+          env:
+            {{- include "crosswalk.env" . | nindent 12 }}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          {{- include "crosswalk.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - {name: footage, mountPath: /footage}
+            - {name: tmp, mountPath: /tmp}
+      containers:
+        - name: ingest
+          image: "{{ .Values.image.ingest.repository }}:{{ .Values.image.ingest.tag }}"
+          imagePullPolicy: {{ .Values.image.ingest.pullPolicy }}
+          args: ["/footage"]
+          env:
+            {{- include "crosswalk.env" . | nindent 12 }}
+            - {name: CROSSWALK_INGEST_SAMPLING, value: {{ $p.ingest.sampling | quote }}}
+            - {name: CROSSWALK_INGEST_OVERFLOW, value: {{ $p.ingest.overflow | quote }}}
+            - {name: CROSSWALK_INGEST_BUFFER, value: {{ $p.ingest.buffer | quote }}}
+            - {name: CROSSWALK_INGEST_PUBLISHERS, value: {{ $p.ingest.publishers | quote }}}
+            - {name: CROSSWALK_INGEST_REALTIME, value: {{ $p.ingest.realtime | quote }}}
+            - {name: CROSSWALK_INGEST_LOOP, value: {{ $p.ingest.loop | quote }}}
+            {{- with $p.ingest.resize }}
+            - {name: CROSSWALK_INGEST_RESIZE, value: {{ . | quote }}}
+            {{- end }}
+            - {name: CROSSWALK_FRAMES_BUCKET, value: {{ $p.ingest.framesBucket | quote }}}
+            - {name: CROSSWALK_FRAMES_PREFIX, value: {{ $p.ingest.framesPrefix | quote }}}
+            - {name: CROSSWALK_TOPIC_PARTITIONS, value: {{ $p.ingest.partitions | quote }}}
+            - {name: CROSSWALK_INGEST_LISTEN, value: "0.0.0.0:9100"}
+          ports:
+            - {name: http, containerPort: 9100}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+          resources:
+            {{- toYaml $p.ingest.resources | nindent 12 }}
+          {{- include "crosswalk.containerSecurity" . | nindent 10 }}
+          volumeMounts:
+            - {name: footage, mountPath: /footage, readOnly: true}
+      volumes:
+        - name: footage
+          emptyDir:
+            sizeLimit: {{ $p.ingest.footageSizeLimit }}
+        - name: tmp
+          emptyDir: {}
+{{- range $stage := list "tracking" "indicators" "ranking" }}
+{{- $cfg := index $p $stage }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $root.Chart.Name }}-{{ $stage }}
+  labels:
+    {{- include "crosswalk.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $stage }}
+spec:
+  {{- if eq $stage "ranking" }}
+  # SQLite has one writer: exactly one pod, and the old one stops before the
+  # new one opens the database.
+  replicas: 1
+  strategy:
+    type: Recreate
+  {{- else }}
+  # Pods of a stage share one consumer group; more pods than input
+  # partitions just leaves the extras idle (docs/streaming.md).
+  replicas: {{ $cfg.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $root.Chart.Name }}
+      app.kubernetes.io/component: {{ $stage }}
+  template:
+    metadata:
+      labels:
+        {{- include "crosswalk.labels" $root | nindent 8 }}
+        app.kubernetes.io/component: {{ $stage }}
+      annotations:
+        checksum/config: {{ printf "%s%s" (toYaml $p.stages) (toYaml $p.cameras) | sha256sum }}
+    spec:
+      {{- include "crosswalk.cpuPodSecurity" $root | nindent 6 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: {{ $stage }}
+          {{- include "crosswalk.cpuImage" $root | nindent 10 }}
+          args: ["stage", {{ $stage | quote }}, "--config", "/config/stages.yaml", "--port", "8080"]
+          env:
+            {{- include "crosswalk.env" $root | nindent 12 }}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml $cfg.resources | nindent 12 }}
+          {{- include "crosswalk.containerSecurity" $root | nindent 10 }}
+          volumeMounts:
+            - {name: config, mountPath: /config/stages.yaml, subPath: stages.yaml, readOnly: true}
+            - {name: cameras, mountPath: /config/cameras, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            {{- if eq $stage "ranking" }}
+            - {name: data, mountPath: /data}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $root.Chart.Name }}-stages
+        - name: cameras
+          configMap:
+            name: {{ $root.Chart.Name }}-cameras
+        - name: tmp
+          emptyDir: {}
+        {{- if eq $stage "ranking" }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $root.Chart.Name }}-ranking
+        {{- end }}
+{{- end }}
+{{- range $component := list "ingest" "tracking" "indicators" "ranking" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $root.Chart.Name }}-{{ $component }}
+  labels:
+    {{- include "crosswalk.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+    crosswalk.pipeline/metrics: "true"
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $root.Chart.Name }}
+    app.kubernetes.io/component: {{ $component }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- end }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Chart.Name }}-ranking
+  labels:
+    {{- include "crosswalk.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ranking
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with $p.ranking.storage.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $p.ranking.storage.size }}
+---
+# One ServiceMonitor for the four pipeline Services (same port and path).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Chart.Name }}-pipeline
+  labels:
+    {{- include "crosswalk.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      crosswalk.pipeline/metrics: "true"
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ $p.serviceMonitor.interval }}
+      scrapeTimeout: 10s
+{{- end }}

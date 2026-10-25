@@ -14,3 +14,6 @@ mlruns/
 *.avi
 *.webm
 /data/
+
+# crosswalk demo output
+/demo-out/

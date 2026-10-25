@@ -191,3 +191,103 @@ def test_argocd_application_points_at_this_chart():
     assert app["spec"]["source"]["path"] == "chart/crosswalk"
     assert app["spec"]["destination"]["namespace"] == "crosswalk"
     assert app["spec"]["source"]["repoURL"].endswith("griffinseibold/crosswalk-world-cup")
+
+
+# -- Milestone 3: the streaming pipeline -------------------------------------------
+
+
+def pipeline_docs(*args: str) -> list[dict]:
+    return render("--set", "pipeline.enabled=true", *args)
+
+
+def test_pipeline_is_off_by_default_and_inference_stays_in_file_mode():
+    docs = render()
+    assert not [d for d in docs if d["metadata"]["name"].startswith("crosswalk-ingest")]
+    [cm] = [
+        d
+        for d in by_kind(docs, "ConfigMap")
+        if d["metadata"]["name"] == "crosswalk-inference-config"
+    ]
+    assert yaml.safe_load(cm["data"]["inference.yaml"])["mode"] == "file"
+
+
+def test_pipeline_renders_every_stage_with_kafka_and_s3_wiring():
+    docs = pipeline_docs()
+    deployments = {d["metadata"]["name"]: d for d in by_kind(docs, "Deployment")}
+    assert set(deployments) == {
+        "crosswalk-inference", "crosswalk-ingest", "crosswalk-tracking", "crosswalk-indicators", "crosswalk-ranking",
+    }  # fmt: skip
+    for name, dep in deployments.items():
+        spec = pod_spec(dep)
+        container = spec["containers"][0]
+        env = {e["name"]: e for e in container["env"]}
+        assert env["KAFKA_BOOTSTRAP_SERVERS"]["value"] == "kafka.kafka.svc.cluster.local:9092", name
+        assert env["AWS_ENDPOINT_URL_S3"]["value"] == "http://s3.ml-storage.svc.cluster.local:9000"
+        assert spec["securityContext"]["runAsNonRoot"] is True
+        assert container["securityContext"]["readOnlyRootFilesystem"] is True
+        assert "homelab.local/llm" not in dep["metadata"].get("labels", {})
+        if name != "crosswalk-inference":
+            assert "amd.com/gpu" not in container.get("resources", {}).get("limits", {}), name
+    ingest = pod_spec(deployments["crosswalk-ingest"])
+    assert ingest["containers"][0]["image"].startswith("ghcr.io/griffinseibold/crosswalk-ingest:")
+    assert ingest["initContainers"][0]["args"] == ["sync", "s3://datasets/footage/=/footage"]
+    ranking = deployments["crosswalk-ranking"]
+    assert ranking["spec"]["replicas"] == 1 and ranking["spec"]["strategy"]["type"] == "Recreate"
+    claims = [
+        v["persistentVolumeClaim"]["claimName"]
+        for v in pod_spec(ranking)["volumes"]
+        if "persistentVolumeClaim" in v
+    ]
+    assert claims == ["crosswalk-ranking"]
+    [cm] = [
+        d
+        for d in by_kind(docs, "ConfigMap")
+        if d["metadata"]["name"] == "crosswalk-inference-config"
+    ]
+    assert yaml.safe_load(cm["data"]["inference.yaml"])["mode"] == "kafka"
+
+
+def test_pipeline_stage_config_is_valid_and_points_at_the_mounts():
+    from crosswalk.stages import StagesConfig
+
+    docs = pipeline_docs()
+    [cm] = [d for d in by_kind(docs, "ConfigMap") if d["metadata"]["name"] == "crosswalk-stages"]
+    config = StagesConfig.model_validate(yaml.safe_load(cm["data"]["stages.yaml"]))
+    assert config.indicators.cameras_dir == "/config/cameras"
+    assert config.ranking.database == "/data/ranking.sqlite3"
+    [cams] = [d for d in by_kind(docs, "ConfigMap") if d["metadata"]["name"] == "crosswalk-cameras"]
+    from crosswalk.indicators.camera import CameraConfig
+
+    for text in cams["data"].values():
+        CameraConfig.model_validate(yaml.safe_load(text))
+
+
+def test_leaderboard_route_and_opt_in_lan_access():
+    docs = pipeline_docs()
+    [route] = by_kind(docs, "HTTPRoute")
+    assert route["spec"]["hostnames"] == ["crosswalk.localhost"]
+    backends = [r["backendRefs"][0]["name"] for r in route["spec"]["rules"]]
+    assert backends == ["crosswalk", "crosswalk-ranking"]  # /status, then everything else
+    [ns] = by_kind(docs, "Namespace")
+    assert "gateway.homelab/lan" not in ns["metadata"]["labels"]
+
+    docs = pipeline_docs("--set", "httpRoute.lan.enabled=true")
+    lan = [r for r in by_kind(docs, "HTTPRoute") if r["metadata"]["name"] == "crosswalk-lan"]
+    assert lan and lan[0]["spec"]["hostnames"] == ["crosswalk.lab.internal"]
+    assert lan[0]["spec"]["parentRefs"][0]["sectionName"] == "lan"
+    [ns] = by_kind(docs, "Namespace")
+    assert ns["metadata"]["labels"]["gateway.homelab/lan"] == "true"
+
+
+def test_pipeline_metrics_are_scraped():
+    docs = pipeline_docs()
+    monitors = {d["metadata"]["name"]: d for d in by_kind(docs, "ServiceMonitor")}
+    selector = monitors["crosswalk-pipeline"]["spec"]["selector"]["matchLabels"]
+    services = [
+        s
+        for s in by_kind(docs, "Service")
+        if all(s["metadata"]["labels"].get(k) == v for k, v in selector.items())
+    ]
+    assert sorted(s["metadata"]["name"] for s in services) == [
+        "crosswalk-indicators", "crosswalk-ingest", "crosswalk-ranking", "crosswalk-tracking",
+    ]  # fmt: skip

@@ -40,11 +40,21 @@ jobs:
       - uses: azure/setup-helm@v4
         with:
           version: v3.19.0
+      # FFmpeg and the Rust toolchain: the end-to-end demo test also runs
+      # through the real frame sampler (tests/test_demo_integration.py).
+      - run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends ffmpeg
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ingest
+      - run: cargo build --release --locked
+        working-directory: ingest
       - run: pip install --requirement requirements/cpu.txt --requirement requirements/dev.txt
       - run: pip install --no-deps --editable .
       # -ra lists skips; nothing should be skipped here, since every
       # optional dependency is installed. Fail if anything was.
       - run: pytest -ra -p no:cacheprovider | tee pytest.log
+        env:
+          CROSSWALK_INGEST_BIN: ${{ github.workspace }}/ingest/target/release/crosswalk-ingest
       - run: "! grep -E '^SKIPPED' pytest.log"
 
   lint-chart:
@@ -56,6 +66,7 @@ jobs:
           version: v3.19.0
       - run: helm lint chart/crosswalk
       - run: helm lint chart/crosswalk --set gpu.enabled=true --set image.gpu.tag=rocm-ci
+      - run: helm lint chart/crosswalk --set pipeline.enabled=true --set httpRoute.lan.enabled=true
       - run: helm template crosswalk chart/crosswalk --namespace crosswalk >/dev/null
       - run: >
           helm template crosswalk chart/crosswalk --namespace crosswalk

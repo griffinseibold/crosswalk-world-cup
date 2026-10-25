@@ -10,10 +10,16 @@ image:
     repository: crosswalk-world-cup
     tag: rocm-unset      # set to the tag build-rocm-image.sh prints
     pullPolicy: IfNotPresent
-  # The CPU image CI publishes for each release tag.
+  # The CPU image CI publishes for each release tag. The streaming stages
+  # after inference (tracking, indicators, ranking) always use it.
   cpu:
     repository: ghcr.io/griffinseibold/crosswalk-world-cup
     tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  # The Rust frame sampler, published by CI on version tags.
+  ingest:
+    repository: ghcr.io/griffinseibold/crosswalk-ingest
+    tag: "0.2.0"
     pullPolicy: IfNotPresent
 
 gpu:
@@ -54,18 +60,33 @@ namespace:
 
 httpRoute:
   enabled: true
-  # Claims crosswalk.<domain>: http://crosswalk.localhost:8080/status
+  # Claims crosswalk.<domain>. With pipeline.enabled the route serves the
+  # leaderboard (ranking service) at http://crosswalk.localhost:8080/ and
+  # the inference status at /status; otherwise only the inference service.
   domain: localhost
   hostnames: []
   parentRef:
     name: homelab
     namespace: gateway-system
     sectionName: http
+  # Home-network access per the homelab's LAN contract (docs/operations.md
+  # there): adds crosswalk.lab.internal on the Gateway's `lan` listener and
+  # labels the namespace gateway.homelab/lan: "true". Off by default: anyone
+  # on the Wi-Fi could open the page. Add the name to the router's DNS too.
+  lan:
+    enabled: false
+    hostname: crosswalk.lab.internal
+    sectionName: lan
+
+# Kafka (homelab: PLAINTEXT, auto-creation off; every component creates the
+# topics it uses at startup, replication factor 1).
+kafka:
+  bootstrapServers: kafka.kafka.svc.cluster.local:9092
 
 s3:
   endpoint: http://s3.ml-storage.svc.cluster.local:9000
   region: us-east-1
-  # Created by the homelab: scripts/ml-credentials.sh crosswalk
+  # Created by the homelab: scripts/ml-credentials.py crosswalk
   # Keys AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.
   credentialsSecret: s3-credentials
 
@@ -77,7 +98,9 @@ inference:
   replicaCount: 1
   # Rendered into a ConfigMap and passed as --config. Same schema as
   # configs/inference.yaml (src/crosswalk/config.py, InferenceConfig).
+  # With pipeline.enabled the chart switches mode to kafka.
   config:
+    mode: file
     device: auto
     precision: fp32
     model:
@@ -104,6 +127,12 @@ inference:
       s3_prefix: s3://datasets/detections/
     server:
       port: 8080
+    kafka:
+      group: crosswalk-inference
+      partitions: 3
+      max_records: 64
+      fetch_workers: 8
+      resize: null
   resources:
     gpu:
       requests: {cpu: "2", memory: 6Gi}
@@ -161,5 +190,75 @@ job:
       requests: {cpu: "2", memory: 4Gi}
       limits: {memory: 8Gi}
 
+# Milestone 3: the streaming pipeline. Off by default so the chart still
+# installs where Kafka does not exist; turn on once the homelab's Kafka is up.
+pipeline:
+  enabled: false
+  ingest:
+    replicaCount: 1
+    # Recorded, blurred clips (docs/data.md) synced from S3 into an emptyDir
+    # by an init container, then played in a loop at their own frame rate.
+    footage: s3://datasets/footage/
+    sampling: "fps:5"
+    overflow: block          # block (lose nothing) | drop (bounded latency)
+    buffer: 32
+    publishers: 4
+    realtime: true
+    loop: true
+    resize: "1280x720"
+    framesBucket: datasets
+    framesPrefix: frames
+    partitions: 3
+    footageSizeLimit: 20Gi
+    resources:
+      requests: {cpu: 500m, memory: 256Mi}
+      limits: {memory: 1Gi}
+  tracking:
+    replicaCount: 1
+    resources:
+      requests: {cpu: 250m, memory: 256Mi}
+      limits: {memory: 1Gi}
+  indicators:
+    replicaCount: 1
+    resources:
+      requests: {cpu: 250m, memory: 256Mi}
+      limits: {memory: 1Gi}
+  ranking:
+    # SQLite, one writer: exactly one replica (docs/ranking.md).
+    storage:
+      size: 1Gi
+      storageClassName: ""
+    resources:
+      requests: {cpu: 100m, memory: 128Mi}
+      limits: {memory: 512Mi}
+  # configs/stages.yaml, inlined (StagesConfig in src/crosswalk/stages.py).
+  # cameras_dir and database are fixed by the chart's mounts.
+  stages:
+    tracking:
+      kafka: {group: crosswalk-tracking, partitions: 3}
+      high_threshold: 0.5
+      low_threshold: 0.1
+      min_hits: 2
+      max_age_s: 1.0
+      reorder_window: 8
+    indicators:
+      kafka: {group: crosswalk-indicators, partitions: 3}
+      window_s: 60
+    ranking:
+      kafka: {group: crosswalk-ranking}
+      min_observed_s: 600
+      min_windows: 5
+      min_pedestrian_minutes: 30
+      confidence: 0.95
+      period_s: null
+      snapshot_every_s: 300
+      change_window_s: 86400
+  # Per-camera configs (configs/cameras/*.yaml): name -> YAML text. The
+  # chart ships the example from the repository (--set-file works too).
+  cameras: {}
+  serviceMonitor:
+    interval: 15s
+
 dashboard:
   enabled: true
+
