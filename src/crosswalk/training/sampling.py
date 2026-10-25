@@ -55,4 +55,6 @@ class ResumableSampler:
         return iter(order[self.start_batch * self.batch_size : usable])
 
     def __len__(self) -> int:
-        return (steps_per_epoch(self.num_samples, self.batch_size) - self.start_batch) * self.batch_size
+        return (
+            steps_per_epoch(self.num_samples, self.batch_size) - self.start_batch
+        ) * self.batch_size

@@ -78,7 +78,9 @@ STAT_NAMES = [
 ]  # fmt: skip
 
 
-def coco_map(samples: list[Sample], predictions: list[Prediction], classes: list[str]) -> dict[str, float]:
+def coco_map(
+    samples: list[Sample], predictions: list[Prediction], classes: list[str]
+) -> dict[str, float]:
     """mAP and friends; -1 from pycocotools (no ground truth for a slice) becomes NaN."""
     if len(samples) != len(predictions):
         raise ValueError("one prediction per sample is required")
@@ -132,7 +134,9 @@ def coco_to_project(classes: list[str], category_map: dict[str, str]) -> dict[in
     return mapping
 
 
-def predict_dataset(model, dataset, device, batch_size: int, num_workers: int = 0) -> list[Prediction]:
+def predict_dataset(
+    model, dataset, device, batch_size: int, num_workers: int = 0
+) -> list[Prediction]:
     import torch
     from torch.utils.data import DataLoader
 

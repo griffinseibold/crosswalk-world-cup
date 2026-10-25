@@ -107,8 +107,7 @@ def describe(device=None) -> dict[str, Any]:
                 "gpu_name": props.name,
                 "gpu_memory_bytes": int(props.total_memory),
                 # gcnArchName (e.g. "gfx1030") exists on ROCm builds only.
-                "gpu_arch": getattr(props, "gcnArchName", None)
-                or f"sm_{props.major}{props.minor}",
+                "gpu_arch": getattr(props, "gcnArchName", None) or f"sm_{props.major}{props.minor}",
                 "gpu_multiprocessors": props.multi_processor_count,
             }
         )

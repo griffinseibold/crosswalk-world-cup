@@ -161,7 +161,9 @@ def parse_coco(config: DatasetConfig, classes: list[str]) -> ParsedDataset:
     for ann in data.get("annotations", []):
         sample = by_image.get(ann["image_id"])
         if sample is None:
-            raise ValueError(f"annotation {ann.get('id')} refers to unknown image {ann['image_id']}")
+            raise ValueError(
+                f"annotation {ann.get('id')} refers to unknown image {ann['image_id']}"
+            )
         label = category_label.get(ann["category_id"])
         if label is None:
             dropped[category_name.get(ann["category_id"], str(ann["category_id"]))] += 1

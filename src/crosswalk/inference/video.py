@@ -112,7 +112,9 @@ def iter_frames(
             yield Frame(video=path, index=index, pts_s=float(pts_s), image=image)
 
 
-def write_test_video(path: str, frames: int = 30, size: tuple[int, int] = (320, 240), fps: int = 30):
+def write_test_video(
+    path: str, frames: int = 30, size: tuple[int, int] = (320, 240), fps: int = 30
+):
     """Encode a short synthetic clip (moving box) for tests and smoke runs."""
     import av
 

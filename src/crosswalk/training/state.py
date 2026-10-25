@@ -140,7 +140,9 @@ def restore(
     return Progress(**state["progress"])
 
 
-def load_model_weights(model, uri: str, cache_dir: str = "/tmp/crosswalk-models") -> list[str] | None:
+def load_model_weights(
+    model, uri: str, cache_dir: str = "/tmp/crosswalk-models"
+) -> list[str] | None:
     """Load only the weights from a training checkpoint (local path or s3://).
 
     Returns the label names (background first) stored in the checkpoint.

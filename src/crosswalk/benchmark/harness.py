@@ -267,7 +267,9 @@ def run_benchmark(
     config: BenchmarkConfig,
     predictor: Predictor | None = None,
     runtime: dict[str, Any] | None = None,
-    frame_loader: Callable[[BenchmarkConfig, int, int], tuple[list[np.ndarray], float]] = load_frames,
+    frame_loader: Callable[
+        [BenchmarkConfig, int, int], tuple[list[np.ndarray], float]
+    ] = load_frames,
 ) -> dict[str, Any]:
     peak_memory = reset_peak = None
     if predictor is None:
@@ -349,7 +351,9 @@ def write_result(result: dict[str, Any], output_dir: str) -> Path:
     from crosswalk.storage import atomic_write_bytes
 
     stamp = result["created_at"].replace(":", "").replace("-", "")
-    path = Path(output_dir) / f"experiment-{result['experiment']}-{stamp}-{result['config_hash']}.json"
+    path = (
+        Path(output_dir) / f"experiment-{result['experiment']}-{stamp}-{result['config_hash']}.json"
+    )
     atomic_write_bytes(path, json.dumps(result, indent=2, default=str).encode() + b"\n")
     return path
 

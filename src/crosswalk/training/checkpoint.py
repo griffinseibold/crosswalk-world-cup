@@ -139,9 +139,7 @@ class CheckpointManager:
     def _prune(self) -> None:
         for store in (s for s in (self.remote, self.local) if s is not None):
             try:
-                steps = sorted(
-                    int(m.group(1)) for k in store.list() if (m := STEP_FILE.match(k))
-                )
+                steps = sorted(int(m.group(1)) for k in store.list() if (m := STEP_FILE.match(k)))
                 for old in steps[: -self.keep_last]:
                     store.delete(step_key(old))
             except Exception as err:
@@ -187,7 +185,9 @@ class CheckpointManager:
                 continue
             expected = pointer.get("sha256") if pointer else None
             if expected and file_sha256(path) != expected:
-                log.warning("checkpoint step %d from %s failed its checksum; skipping", step, source)
+                log.warning(
+                    "checkpoint step %d from %s failed its checksum; skipping", step, source
+                )
                 continue
             return Found(step, path, pointer or {"step": step, "key": step_key(step)}, source)
         return None

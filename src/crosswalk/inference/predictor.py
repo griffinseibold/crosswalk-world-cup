@@ -112,7 +112,9 @@ class TorchPredictor:
 class FakePredictor:
     """Deterministic stand-in: sleeps ``base_s + per_image_s * N`` per batch."""
 
-    def __init__(self, base_s: float = 0.002, per_image_s: float = 0.001, fail_on: int | None = None):
+    def __init__(
+        self, base_s: float = 0.002, per_image_s: float = 0.001, fail_on: int | None = None
+    ):
         self.base_s = base_s
         self.per_image_s = per_image_s
         self.calls = 0

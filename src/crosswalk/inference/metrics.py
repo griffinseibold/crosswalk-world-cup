@@ -105,9 +105,7 @@ class Metrics:
         self.detections = Counter(
             _counter_base(DETECTIONS), "Detections above the score threshold", ["label"], registry=r
         )
-        self.gpu_memory = Gauge(
-            GPU_MEMORY, "Memory held by PyTorch tensors on the GPU", registry=r
-        )
+        self.gpu_memory = Gauge(GPU_MEMORY, "Memory held by PyTorch tensors on the GPU", registry=r)
         self.ready = Gauge(READY, "1 once the model is loaded and warmed up", registry=r)
         self.model_info = Info(MODEL_INFO, "Model, weights and runtime serving frames", registry=r)
 

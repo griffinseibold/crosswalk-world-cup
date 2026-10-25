@@ -57,9 +57,7 @@ def images_sha256(parsed: ParsedDataset, image_root: str | Path) -> str:
 def dataset_manifest(parsed: ParsedDataset, image_root: str | Path, hash_images: bool) -> dict:
     labels = {Path(f).name: file_sha256(f) for f in sorted(parsed.labels_files)}
     parts = {
-        "labels_sha256": hashlib.sha256(
-            json.dumps(labels, sort_keys=True).encode()
-        ).hexdigest(),
+        "labels_sha256": hashlib.sha256(json.dumps(labels, sort_keys=True).encode()).hexdigest(),
         "samples_sha256": samples_sha256(parsed),
         "images_sha256": images_sha256(parsed, image_root) if hash_images else None,
     }

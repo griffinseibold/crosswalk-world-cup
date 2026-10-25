@@ -131,7 +131,9 @@ def run(config: InferenceConfig, *, serve: bool, predictor=None) -> dict[str, An
                 batcher = Batcher(config.batching)
 
                 def on_result(meta, detections, timing, name=name):
-                    writer.write(name, detection_record(meta, detections, timing, predictor.model_version))
+                    writer.write(
+                        name, detection_record(meta, detections, timing, predictor.model_version)
+                    )
 
                 worker = InferenceWorker(
                     batcher, predictor, metrics, on_result=on_result, gpu_memory=gpu_memory

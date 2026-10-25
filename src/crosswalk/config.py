@@ -176,6 +176,10 @@ class EvalConfig(StrictModel):
     batch_size: int = Field(4, ge=1)
     # Score the pretrained COCO model on the eval set too, as the baseline.
     baseline: bool = True
+    # COCO category name -> project class name for the baseline's predictions.
+    # Names not listed map to themselves; anything that is not a project class
+    # afterwards is discarded before scoring.
+    baseline_category_map: dict[str, str] = Field(default_factory=lambda: {"person": "pedestrian"})
 
 
 class TrainingConfig(StrictModel):

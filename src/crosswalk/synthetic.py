@@ -28,9 +28,17 @@ def _draw(rng: np.random.Generator, width: int, height: int, max_objects: int):
     for _ in range(int(rng.integers(1, max_objects + 1))):
         cls = CLASSES[int(rng.integers(0, len(CLASSES)))]
         if cls == "car":
-            w, h, colour = int(rng.integers(width // 6, width // 3)), int(rng.integers(height // 8, height // 5)), (200, 30, 30)
+            w, h, colour = (
+                int(rng.integers(width // 6, width // 3)),
+                int(rng.integers(height // 8, height // 5)),
+                (200, 30, 30),
+            )
         else:
-            w, h, colour = int(rng.integers(width // 20, width // 12)), int(rng.integers(height // 6, height // 3)), (30, 30, 220)
+            w, h, colour = (
+                int(rng.integers(width // 20, width // 12)),
+                int(rng.integers(height // 6, height // 3)),
+                (30, 30, 220),
+            )
         x1 = int(rng.integers(0, width - w))
         y1 = int(rng.integers(height // 4, height - h))
         image[y1 : y1 + h, x1 : x1 + w] = colour

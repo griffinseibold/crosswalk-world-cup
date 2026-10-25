@@ -70,7 +70,9 @@ class StatusServer:
         return self.httpd.server_address[1]
 
     def start(self) -> None:
-        self._thread = threading.Thread(target=self.httpd.serve_forever, name="status-server", daemon=True)
+        self._thread = threading.Thread(
+            target=self.httpd.serve_forever, name="status-server", daemon=True
+        )
         self._thread.start()
 
     def stop(self) -> None:
